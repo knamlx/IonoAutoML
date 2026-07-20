@@ -1,0 +1,58 @@
+[run]
+# UTC interval. Leave empty to use the last N hours.
+start_utc = "2024-01-01T00:00:00Z"
+end_utc = "2026-01-01T00:00:00Z"
+lookback_hours = 24
+output_dir = "data"
+timeout_seconds = 90
+
+[giro]
+enabled = true
+# Examples: MO155 Moscow-Parus-A, BC840 Boulder, AT138 Athens, DB049 Dourbes.
+# Use "all" to query every station listed in the GIRO FastChar form.
+stations = "all"
+# Use "all" to request every FastChar parameter available in the GIRO form.
+# You can also provide a smaller list, for example:
+# ["foF2", "MUFD", "hmF2", "TEC", "fmin"]
+characteristics = "all"
+muf_distance_km = 3000
+# Large historical pulls are split into smaller requests. 31 days is a practical
+# default for 2024-2025 all-station collection.
+chunk_days = 31
+continue_on_error = true
+
+[noaa]
+enabled = true
+continue_on_error = true
+# NOAA/SWPC endpoints are useful for solar-wind and live products such as Bz.
+# Historical Kp/ap/Ap/F10.7 are collected from GFZ below.
+endpoints = [
+  { name = "goes_primary_xrays_3_day", url = "https://services.swpc.noaa.gov/json/goes/primary/xrays-3-day.json" },
+  { name = "solar_wind_mag_2_hour", url = "https://services.swpc.noaa.gov/products/solar-wind/mag-2-hour.json" },
+  { name = "solar_wind_plasma_2_hour", url = "https://services.swpc.noaa.gov/products/solar-wind/plasma-2-hour.json" }
+]
+
+[gfz]
+enabled = true
+api_url = "https://kp.gfz.de/app/json/"
+# Kp/ap are 3-hour indices, Ap is daily, and Fobs/Fadj are observed/adjusted F10.7.
+indices = ["Kp", "ap", "Ap", "Fobs", "Fadj"]
+# Leave empty to allow nowcast/preliminary values when definitive values are not available.
+status = ""
+
+[omni]
+enabled = true
+api_url = "https://omniweb.gsfc.nasa.gov/cgi/nx1.cgi"
+resolution = "hour"
+variables = ["bz_gsm_nT", "dst_nT", "flow_speed_km_s", "proton_density_n_cc"]
+
+[preprocess]
+# Keep GIRO values within physically plausible broad limits; outliers become blank.
+fof2_min_mhz = 0.5
+fof2_max_mhz = 25.0
+hmf2_min_km = 100.0
+hmf2_max_km = 700.0
+tec_min_tecu = 0.0
+tec_max_tecu = 300.0
+# NOAA rows matched to GIRO rows by nearest timestamp.
+join_tolerance_minutes = 90

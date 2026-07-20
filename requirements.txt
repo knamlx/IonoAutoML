@@ -1,0 +1,2 @@
+# The collector uses Python standard library only.
+# Python 3.11+ is required because it uses tomllib.

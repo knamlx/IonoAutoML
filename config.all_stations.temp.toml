@@ -1,0 +1,25 @@
+[run]
+start_utc = ""
+end_utc = ""
+lookback_hours = 24
+output_dir = "data"
+timeout_seconds = 45
+
+[giro]
+enabled = true
+stations = "all"
+characteristics = "all"
+muf_distance_km = 3000
+
+[noaa]
+enabled = false
+endpoints = []
+
+[preprocess]
+fof2_min_mhz = 0.5
+fof2_max_mhz = 25.0
+hmf2_min_km = 100.0
+hmf2_max_km = 700.0
+tec_min_tecu = 0.0
+tec_max_tecu = 300.0
+join_tolerance_minutes = 90
