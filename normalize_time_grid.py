@@ -48,8 +48,8 @@ GIRO_MEASUREMENTS = [
     "fminEs",
     "foF2p",
 ]
-CORE_INTERPOLATE_COLUMNS = ["foF2", "foF1", "foE", "MUF_D", "hmF2", "TEC", "fmin", "foF2p"]
-CORE_GIRO_POSITIONS = {name: GIRO_MEASUREMENTS.index(name) for name in CORE_INTERPOLATE_COLUMNS}
+CORE_GIRO_COLUMNS = ["foF2", "foF1", "foE", "MUF_D", "hmF2", "TEC", "fmin", "foF2p"]
+CORE_GIRO_POSITIONS = {name: GIRO_MEASUREMENTS.index(name) for name in CORE_GIRO_COLUMNS}
 
 
 def main() -> None:
@@ -59,7 +59,11 @@ def main() -> None:
     parser.add_argument("--output-dir", default="normalized_2024_2025")
     parser.add_argument("--freq", default="auto", help="Pandas frequency, for example 5min. Use auto to infer.")
     parser.add_argument("--min-cs", type=float, default=50.0, help="Soft GIRO confidence cutoff.")
-    parser.add_argument("--max-interpolate-gap", default="30min", help="Interpolate only short GIRO gaps.")
+    parser.add_argument(
+        "--max-interpolate-gap",
+        default="30min",
+        help="Deprecated compatibility option. GIRO values are not interpolated.",
+    )
     parser.add_argument("--top-stations", type=int, default=0, help="Normalize only top N stations by raw data rows. 0 means all.")
     parser.add_argument("--split-by-station", action="store_true", help="Also write one analytical CSV per station.")
     args = parser.parse_args()
@@ -167,7 +171,7 @@ def read_giro_raw(
         return df
     df["time_utc"] = pd.to_datetime(df["time_utc"], utc=True, errors="coerce")
     df = df.dropna(subset=["time_utc"])
-    numeric_columns = ["CS", *CORE_INTERPOLATE_COLUMNS]
+    numeric_columns = ["CS", *CORE_GIRO_COLUMNS]
     for column in numeric_columns:
         if column in df.columns:
             df[column] = pd.to_numeric(df[column], errors="coerce")
@@ -229,33 +233,23 @@ def infer_frequency(times: pd.Series) -> str:
 
 def normalize_giro(df: pd.DataFrame, freq: str, min_cs: float, max_interpolate_gap: str) -> pd.DataFrame:
     filtered = df[(df["CS"].isna()) | (df["CS"] == -1) | (df["CS"] >= min_cs)].copy()
-    numeric_columns = [column for column in ["CS", *CORE_INTERPOLATE_COLUMNS] if column in filtered.columns]
+    numeric_columns = [column for column in ["CS", *CORE_GIRO_COLUMNS] if column in filtered.columns]
     pieces = []
-    gap_limit = gap_to_limit(max_interpolate_gap, freq)
     for station, station_df in filtered.groupby("station", sort=True):
         station_df = station_df.sort_values("time_utc").drop_duplicates("time_utc", keep="last")
         station_df = station_df.set_index("time_utc")
         resampled = station_df[numeric_columns].resample(freq).mean()
-        for column in CORE_INTERPOLATE_COLUMNS:
-            if column in resampled.columns:
-                resampled[column] = resampled[column].interpolate(method="time", limit=gap_limit, limit_area="inside")
+        original_counts = station_df.resample(freq).size().reindex(resampled.index, fill_value=0)
         resampled["station"] = station
-        resampled["had_original_giro_row"] = station_df.resample(freq).size().reindex(resampled.index, fill_value=0).gt(0)
+        resampled["giro_rows_in_interval"] = original_counts.astype(int)
+        resampled["had_original_giro_row"] = original_counts.gt(0)
         pieces.append(resampled.reset_index())
     if not pieces:
         return pd.DataFrame()
     result = pd.concat(pieces, ignore_index=True)
     result["interval"] = make_interval(result["time_utc"], freq)
-    ordered = ["time_utc", "interval", "station", "had_original_giro_row", *numeric_columns]
+    ordered = ["time_utc", "interval", "station", "had_original_giro_row", "giro_rows_in_interval", *numeric_columns]
     return result[[column for column in ordered if column in result.columns]]
-
-
-def gap_to_limit(gap: str, freq: str) -> int | None:
-    gap_delta = pd.to_timedelta(gap)
-    freq_delta = pd.to_timedelta(freq)
-    if pd.isna(gap_delta) or pd.isna(freq_delta) or freq_delta.total_seconds() <= 0:
-        return None
-    return max(1, int(gap_delta / freq_delta))
 
 
 def make_interval(times: pd.Series, freq: str) -> pd.Series:
@@ -274,8 +268,7 @@ def prepare_index_features(processed_dir: Path, freq: str) -> pd.DataFrame:
         gfz["value"] = pd.to_numeric(gfz["value"], errors="coerce")
         gfz = gfz.dropna(subset=["time_utc", "index"])
         gfz = gfz.pivot_table(index="time_utc", columns="index", values="value", aggfunc="mean")
-        gfz = gfz.add_prefix("gfz_").reset_index()
-        frames.append(gfz)
+        frames.append(gfz.add_prefix("gfz_"))
 
     omni_path = processed_dir / "omni_solar_wind.csv"
     if omni_path.exists() and omni_path.stat().st_size > 2:
@@ -284,23 +277,16 @@ def prepare_index_features(processed_dir: Path, freq: str) -> pd.DataFrame:
         for column in ["bz_gsm_nT", "dst_nT", "flow_speed_km_s", "proton_density_n_cc"]:
             if column in omni.columns:
                 omni[column] = pd.to_numeric(omni[column], errors="coerce")
-        keep = ["time_utc", *[column for column in ["bz_gsm_nT", "dst_nT", "flow_speed_km_s", "proton_density_n_cc"] if column in omni.columns]]
-        frames.append(omni[keep].dropna(subset=["time_utc"]))
+        keep = [column for column in ["bz_gsm_nT", "dst_nT", "flow_speed_km_s", "proton_density_n_cc"] if column in omni.columns]
+        omni = omni.dropna(subset=["time_utc"]).set_index("time_utc")[keep].sort_index()
+        frames.append(omni)
 
     if not frames:
         return pd.DataFrame({"time_utc": []})
 
-    merged = frames[0].sort_values("time_utc")
-    for frame in frames[1:]:
-        merged = pd.merge_asof(
-            merged.sort_values("time_utc"),
-            frame.sort_values("time_utc"),
-            on="time_utc",
-            direction="nearest",
-            tolerance=pd.to_timedelta(freq),
-        )
-    merged = merged.set_index("time_utc").resample(freq).ffill().reset_index()
-    return merged
+    resampled = [frame.sort_index().resample(freq).ffill() for frame in frames]
+    merged = pd.concat(resampled, axis=1).sort_index().ffill().reset_index()
+    return merged.rename(columns={"index": "time_utc"})
 
 
 def write_station_datasets(analytical: pd.DataFrame, output_dir: Path) -> list[Path]:
@@ -358,7 +344,8 @@ def write_report(
         "",
         f"- Selected time step: `{freq}`.",
         f"- GIRO confidence filter: `CS >= {min_cs}`, `CS = -1`, or missing CS.",
-        f"- Interpolation limit for core GIRO columns: `{max_interpolate_gap}`.",
+        "- GIRO normalization: measurements are aggregated inside each time interval; missing GIRO intervals stay empty.",
+        "- Index normalization: GFZ/OMNI values are carried forward over their valid time intervals.",
         f"- Active stations used for training grid: {len(active_stations)}.",
         f"- Stations excluded because they have no measurement rows in parsed GIRO: {len(excluded)}.",
         "",

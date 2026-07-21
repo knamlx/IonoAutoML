@@ -147,44 +147,20 @@ def apply_known_fills(file_name: str, rows: list[dict[str, Any]], columns: list[
         filled["status_unknown"] = count
 
     if file_name == "omni_solar_wind.csv" and "flow_speed_km_s" in columns:
-        filled["flow_speed_km_s_interpolated"] = interpolate_numeric_by_time(rows, "time_utc", "flow_speed_km_s")
+        filled["flow_speed_km_s_carried_forward"] = carry_forward_numeric_by_time(rows, "time_utc", "flow_speed_km_s")
     return filled
 
 
-def interpolate_numeric_by_time(rows: list[dict[str, Any]], time_column: str, value_column: str) -> int:
+def carry_forward_numeric_by_time(rows: list[dict[str, Any]], time_column: str, value_column: str) -> int:
     rows.sort(key=lambda row: parse_time(row.get(time_column)) or datetime.max)
-    known = []
-    for index, row in enumerate(rows):
-        value = parse_float(row.get(value_column))
-        when = parse_time(row.get(time_column))
-        if value is not None and when is not None:
-            known.append((index, when, value))
-    if not known:
-        return 0
-
+    last_value = None
     filled = 0
-    known_by_index = {index: (when, value) for index, when, value in known}
-    known_indexes = [index for index, _, _ in known]
-    for index, row in enumerate(rows):
-        if not is_missing(row.get(value_column)):
-            continue
-        when = parse_time(row.get(time_column))
-        if when is None:
-            continue
-        previous_index = max((known_index for known_index in known_indexes if known_index < index), default=None)
-        next_index = min((known_index for known_index in known_indexes if known_index > index), default=None)
-        if previous_index is not None and next_index is not None:
-            previous_time, previous_value = known_by_index[previous_index]
-            next_time, next_value = known_by_index[next_index]
-            span = (next_time - previous_time).total_seconds()
-            ratio = (when - previous_time).total_seconds() / span if span else 0.0
-            row[value_column] = round(previous_value + (next_value - previous_value) * ratio, 3)
-            filled += 1
-        elif previous_index is not None:
-            row[value_column] = known_by_index[previous_index][1]
-            filled += 1
-        elif next_index is not None:
-            row[value_column] = known_by_index[next_index][1]
+    for row in rows:
+        value = parse_float(row.get(value_column))
+        if value is not None:
+            last_value = value
+        elif last_value is not None and parse_time(row.get(time_column)) is not None:
+            row[value_column] = last_value
             filled += 1
     return filled
 
