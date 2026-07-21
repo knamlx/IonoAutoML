@@ -1,0 +1,60 @@
+{
+  "target_frequency": "5min",
+  "timezone": "UTC",
+  "station_selection": {
+    "target": "foF2",
+    "minimum_original_coverage_percent": 50.0,
+    "maximum_missing_percent": 40.0
+  },
+  "variables": {
+    "gfz_Kp": {
+      "source_frequency": "3h",
+      "method": "interval_propagation",
+      "valid_for": "3h"
+    },
+    "gfz_ap": {
+      "source_frequency": "3h",
+      "method": "interval_propagation",
+      "valid_for": "3h"
+    },
+    "gfz_Ap": {
+      "source_frequency": "1D",
+      "method": "interval_propagation",
+      "valid_for": "1D"
+    },
+    "gfz_Fobs": {
+      "source_frequency": "1D",
+      "method": "interval_propagation",
+      "valid_for": "1D"
+    },
+    "gfz_Fadj": {
+      "source_frequency": "1D",
+      "method": "interval_propagation",
+      "valid_for": "1D"
+    },
+    "bz_gsm_nT": {
+      "source_frequency": "1h",
+      "method": "interval_propagation",
+      "valid_for": "1h"
+    },
+    "dst_nT": {
+      "source_frequency": "1h",
+      "method": "interval_propagation",
+      "valid_for": "1h"
+    },
+    "flow_speed_km_s": {
+      "source_frequency": "1h",
+      "method": "interval_propagation",
+      "valid_for": "1h"
+    },
+    "proton_density_n_cc": {
+      "source_frequency": "1h",
+      "method": "interval_propagation",
+      "valid_for": "1h"
+    },
+    "foF2": {
+      "method": "original_interval_aggregation",
+      "long_gaps": "keep_missing"
+    }
+  }
+}

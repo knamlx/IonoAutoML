@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -57,6 +58,7 @@ def main() -> None:
     parser.add_argument("--giro-raw-dir", default="data_2024_2025_giro/raw/giro")
     parser.add_argument("--processed-dir", default="cleaned_2024_2025/processed")
     parser.add_argument("--output-dir", default="normalized_2024_2025")
+    parser.add_argument("--time-config", default="configs/time_normalization.json")
     parser.add_argument("--freq", default="auto", help="Pandas frequency, for example 5min. Use auto to infer.")
     parser.add_argument("--min-cs", type=float, default=50.0, help="Soft GIRO confidence cutoff.")
     parser.add_argument(
@@ -67,6 +69,7 @@ def main() -> None:
     parser.add_argument("--top-stations", type=int, default=0, help="Normalize only top N stations by raw data rows. 0 means all.")
     parser.add_argument("--split-by-station", action="store_true", help="Also write one analytical CSV per station.")
     args = parser.parse_args()
+    time_config = load_time_config(Path(args.time_config))
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -84,7 +87,7 @@ def main() -> None:
     coverage = build_station_coverage(giro)
     excluded = coverage[coverage["data_rows"] == 0]["station"].tolist()
     active_stations = sorted(giro["station"].dropna().unique().tolist())
-    freq = infer_frequency(giro["time_utc"]) if args.freq == "auto" else args.freq
+    freq = choose_target_frequency(args.freq, time_config, giro["time_utc"])
     print(f"Inferred/selected frequency: {freq}")
     print(f"Active GIRO stations: {len(active_stations)}")
 
@@ -94,7 +97,7 @@ def main() -> None:
 
     print("Preparing index features...")
     processed_dir = Path(args.processed_dir)
-    indices = prepare_index_features(processed_dir, freq)
+    indices = prepare_index_features(processed_dir, freq, time_config)
 
     print("Merging features by time...")
     analytical = normalized_giro.merge(indices, on="time_utc", how="left")
@@ -102,6 +105,13 @@ def main() -> None:
     station_files = write_station_datasets(analytical, output_dir) if args.split_by_station else []
 
     coverage.to_csv(output_dir / "station_coverage.csv", index=False)
+    quality_files = write_station_quality_reports(
+        analytical,
+        coverage,
+        output_dir,
+        freq,
+        time_config.get("station_selection", {}),
+    )
     write_report(
         output_dir / "time_normalization_report.md",
         giro,
@@ -114,8 +124,25 @@ def main() -> None:
         args.min_cs,
         args.max_interpolate_gap,
         station_files,
+        quality_files,
     )
     print(f"Wrote normalized outputs to {output_dir}")
+
+
+def load_time_config(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def choose_target_frequency(freq_arg: str, time_config: dict[str, Any], times: pd.Series) -> str:
+    if freq_arg != "auto":
+        return freq_arg
+    configured = time_config.get("target_frequency")
+    if configured:
+        return str(configured)
+    return infer_frequency(times)
 
 
 def scan_giro_station_stats(raw_dir: Path) -> dict[str, dict[str, int]]:
@@ -259,7 +286,8 @@ def make_interval(times: pd.Series, freq: str) -> pd.Series:
     return starts.dt.strftime("%H:%M") + "-" + ends.dt.strftime("%H:%M")
 
 
-def prepare_index_features(processed_dir: Path, freq: str) -> pd.DataFrame:
+def prepare_index_features(processed_dir: Path, freq: str, time_config: dict[str, Any]) -> pd.DataFrame:
+    variable_rules = time_config.get("variables", {})
     frames = []
     gfz_path = processed_dir / "geophysical_indices.csv"
     if gfz_path.exists() and gfz_path.stat().st_size > 2:
@@ -268,7 +296,8 @@ def prepare_index_features(processed_dir: Path, freq: str) -> pd.DataFrame:
         gfz["value"] = pd.to_numeric(gfz["value"], errors="coerce")
         gfz = gfz.dropna(subset=["time_utc", "index"])
         gfz = gfz.pivot_table(index="time_utc", columns="index", values="value", aggfunc="mean")
-        frames.append(gfz.add_prefix("gfz_"))
+        gfz = gfz.add_prefix("gfz_").sort_index()
+        frames.append(propagate_interval_features(gfz, freq, variable_rules))
 
     omni_path = processed_dir / "omni_solar_wind.csv"
     if omni_path.exists() and omni_path.stat().st_size > 2:
@@ -279,14 +308,51 @@ def prepare_index_features(processed_dir: Path, freq: str) -> pd.DataFrame:
                 omni[column] = pd.to_numeric(omni[column], errors="coerce")
         keep = [column for column in ["bz_gsm_nT", "dst_nT", "flow_speed_km_s", "proton_density_n_cc"] if column in omni.columns]
         omni = omni.dropna(subset=["time_utc"]).set_index("time_utc")[keep].sort_index()
-        frames.append(omni)
+        frames.append(propagate_interval_features(omni, freq, variable_rules))
 
     if not frames:
         return pd.DataFrame({"time_utc": []})
 
-    resampled = [frame.sort_index().resample(freq).ffill() for frame in frames]
-    merged = pd.concat(resampled, axis=1).sort_index().ffill().reset_index()
+    merged = pd.concat(frames, axis=1).sort_index().reset_index()
     return merged.rename(columns={"index": "time_utc"})
+
+
+def propagate_interval_features(frame: pd.DataFrame, freq: str, variable_rules: dict[str, Any]) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    start = frame.index.min().floor(freq)
+    end = frame.index.max().ceil(freq)
+    grid = pd.date_range(start=start, end=end, freq=freq, tz="UTC")
+    output = pd.DataFrame(index=grid)
+    source_times = pd.Series(frame.index, index=frame.index)
+
+    for column in frame.columns:
+        valid_for = pd.to_timedelta(variable_rules.get(column, {}).get("valid_for", "0s"))
+        provenance_name = provenance_column_name(column)
+        values = frame[column].resample(freq).ffill().reindex(grid).ffill()
+        propagated_source = source_times.resample(freq).ffill().reindex(grid).ffill()
+        valid_until = propagated_source + valid_for
+        is_valid = propagated_source.notna() & (valid_for > pd.Timedelta(0)) & (output.index < valid_until)
+
+        output[column] = values.where(is_valid)
+        output[f"{provenance_name}_source_time"] = propagated_source.where(is_valid)
+        output[f"{provenance_name}_valid_until"] = valid_until.where(is_valid)
+    return output
+
+
+def provenance_column_name(column: str) -> str:
+    aliases = {
+        "gfz_Kp": "Kp",
+        "gfz_ap": "ap",
+        "gfz_Ap": "Ap",
+        "gfz_Fobs": "Fobs",
+        "gfz_Fadj": "Fadj",
+        "bz_gsm_nT": "Bz",
+        "dst_nT": "Dst",
+        "flow_speed_km_s": "flow_speed",
+        "proton_density_n_cc": "proton_density",
+    }
+    return aliases.get(column, column)
 
 
 def write_station_datasets(analytical: pd.DataFrame, output_dir: Path) -> list[Path]:
@@ -299,6 +365,84 @@ def write_station_datasets(analytical: pd.DataFrame, output_dir: Path) -> list[P
         station_df.to_csv(path, index=False)
         station_files.append(path)
     return station_files
+
+
+def write_station_quality_reports(
+    analytical: pd.DataFrame,
+    coverage: pd.DataFrame,
+    output_dir: Path,
+    freq: str,
+    selection_rules: dict[str, Any],
+) -> list[Path]:
+    report_dir = output_dir / "reports" / "station_quality"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    files = []
+    coverage_by_station = coverage.set_index("station").to_dict("index") if not coverage.empty else {}
+    target = selection_rules.get("target", "foF2")
+    min_original = float(selection_rules.get("minimum_original_coverage_percent", 50.0))
+    max_missing = float(selection_rules.get("maximum_missing_percent", 40.0))
+
+    for station, station_df in analytical.groupby("station", sort=True):
+        station_df = station_df.sort_values("time_utc").reset_index(drop=True)
+        total_rows = len(station_df)
+        target_present = station_df[target].notna() if target in station_df.columns else pd.Series(False, index=station_df.index)
+        original_mask = station_df["had_original_giro_row"].astype(bool) & target_present
+        missing_mask = ~target_present
+        original_percent = percent(original_mask.sum(), total_rows)
+        missing_percent = percent(missing_mask.sum(), total_rows)
+        longest_gap_hours = longest_missing_gap_hours(missing_mask, freq)
+        exclusion_reasons = []
+        if original_percent < min_original:
+            exclusion_reasons.append(f"{target}_original_coverage_below_{min_original:g}_percent")
+        if missing_percent > max_missing:
+            exclusion_reasons.append(f"{target}_missing_above_{max_missing:g}_percent")
+        coverage_row = coverage_by_station.get(station, {})
+        report = {
+            "station_id": station,
+            "period": {
+                "start": stringify_timestamp(station_df["time_utc"].min()),
+                "end": stringify_timestamp(station_df["time_utc"].max()),
+            },
+            "raw_files": int(coverage_row.get("raw_files", 0) or 0),
+            "source_measurement_rows": int(coverage_row.get("data_rows", 0) or 0),
+            "normalized_rows": total_rows,
+            target: {
+                "original_percent": original_percent,
+                "missing_percent": missing_percent,
+                "longest_gap_hours": longest_gap_hours,
+            },
+            "accepted": not exclusion_reasons,
+            "exclusion_reasons": exclusion_reasons,
+        }
+        path = report_dir / f"{station}.json"
+        with path.open("w", encoding="utf-8") as fh:
+            json.dump(report, fh, ensure_ascii=False, indent=2)
+        files.append(path)
+    return files
+
+
+def percent(count: int, total: int) -> float:
+    return round(count / total * 100, 2) if total else 0.0
+
+
+def longest_missing_gap_hours(mask: pd.Series, freq: str) -> float:
+    if mask.empty:
+        return 0.0
+    max_run = 0
+    current_run = 0
+    for missing in mask.tolist():
+        if missing:
+            current_run += 1
+            max_run = max(max_run, current_run)
+        else:
+            current_run = 0
+    return round(max_run * pd.to_timedelta(freq).total_seconds() / 3600, 2)
+
+
+def stringify_timestamp(value: Any) -> str:
+    if pd.isna(value):
+        return ""
+    return pd.Timestamp(value).isoformat()
 
 
 def build_station_coverage(giro: pd.DataFrame) -> pd.DataFrame:
@@ -336,6 +480,7 @@ def write_report(
     min_cs: float,
     max_interpolate_gap: str,
     station_files: list[Path],
+    quality_files: list[Path],
 ) -> None:
     source_missing = missing_summary(giro, ["foF2", "MUF_D", "hmF2", "TEC", "fmin", "foF2p"])
     normalized_missing = missing_summary(normalized, ["foF2", "MUF_D", "hmF2", "TEC", "fmin", "foF2p"])
@@ -353,6 +498,7 @@ def write_report(
         "- `giro_time_grid.csv`: normalized GIRO rows by station and time.",
         "- `analytical_time_grid.csv`: GIRO grid with geophysical and OMNI features joined by time.",
         f"- `stations/*.csv`: {len(station_files)} separate station datasets.",
+        f"- `reports/station_quality/*.json`: {len(quality_files)} station quality reports.",
         "- `station_coverage.csv`: station coverage summary.",
         "",
         "## Shape",
