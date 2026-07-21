@@ -21,6 +21,48 @@ README фиксирует текущее состояние рабочего п�
 
 Парсер сохраняет сырые ответы источников, нормализованные таблицы, список станций, журнал загрузки и манифест запуска.
 
+## Итог 2026-07-21
+
+Зафиксирован текущий рабочий результат подготовки данных за 2024-2025 годы.
+
+- Добавлен `clean_collected_data.py` для мягкой чистки обработанных CSV:
+  - пропуски `status` в `geophysical_indices.csv` заменяются на `unknown`;
+  - пропуски `flow_speed_km_s` в `omni_solar_wind.csv` заполняются интерполяцией по времени;
+  - строки с пропусками больше 30% и колонки с пропусками больше 45% можно отбрасывать автоматически.
+- Добавлен `normalize_time_grid.py` для приведения GIRO, GFZ и OMNI к единому временному шагу.
+- Для обучения выбран практичный шаг `5min`: автооценка находила `2min`, но такой шаг сильно раздувает датасет.
+- GIRO-станции без реальных строк измерений не используются в обучающих выборках: сейчас исключены 65 пустых станций.
+- Значение GIRO `CS = -1` сохранено как допустимое, потому что в DIDBase это означает unknown/manual quality, а не плохое качество.
+- Создан актуальный нормализованный результат по станциям:
+  - `normalized_2024_2025_top3_5min_by_station/stations/NI63_time_grid.csv`;
+  - `normalized_2024_2025_top3_5min_by_station/stations/PQ052_time_grid.csv`;
+  - `normalized_2024_2025_top3_5min_by_station/stations/TR169_time_grid.csv`.
+- Пустые логи удалены, непустые логи перенесены в `logs_archive/`.
+- Пробные устаревшие результаты нормализации удалены; оставлены код, исходные данные и актуальный результат по станциям.
+
+Команды для повторения текущего результата:
+
+```powershell
+python .\clean_collected_data.py `
+  --input-dir data_2024_2025_indices `
+  --giro-raw-dir data_2024_2025_giro\raw\giro `
+  --output-dir cleaned_2024_2025 `
+  --row-threshold 0.30 `
+  --column-threshold 0.45
+
+python .\normalize_time_grid.py `
+  --giro-raw-dir data_2024_2025_giro\raw\giro `
+  --processed-dir cleaned_2024_2025\processed `
+  --output-dir normalized_2024_2025_top3_5min_by_station `
+  --freq 5min `
+  --min-cs 50 `
+  --max-interpolate-gap 30min `
+  --top-stations 3 `
+  --split-by-station
+```
+
+Для расширения на все станции с данными можно заменить `--top-stations 3` на `--top-stations 55`. Такой запуск будет существенно дольше и создаст отдельный CSV для каждой активной станции.
+
 ## Текущее состояние
 
 Уже добавлено:

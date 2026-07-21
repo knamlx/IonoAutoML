@@ -18,7 +18,7 @@ characteristics = "all"
 muf_distance_km = 3000
 # Large historical pulls are split into smaller requests. 31 days is a practical
 # default for 2024-2025 all-station collection.
-chunk_days = 31
+chunk_days = 365
 continue_on_error = true
 
 [noaa]

@@ -7,9 +7,12 @@ import argparse
 import csv
 import json
 import re
+import os
+import subprocess
 import sys
 import time
 import tomllib
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -155,6 +158,8 @@ def init_paths(config: dict[str, Any], args: argparse.Namespace) -> Paths:
 
 def fetch_url(url: str, *, data: dict[str, Any] | None, timeout: int, attempts: int = 3) -> bytes:
     body = urlencode(data, doseq=True).encode("utf-8") if data else None
+    if "giro.uml.edu" in url:
+        return fetch_url_with_powershell(url, body=body, timeout=timeout)
     headers = {"User-Agent": USER_AGENT}
     if body:
         headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -168,7 +173,47 @@ def fetch_url(url: str, *, data: dict[str, Any] | None, timeout: int, attempts: 
             last_error = exc
             if attempt < attempts:
                 time.sleep(2 * attempt)
+    if "giro.uml.edu" in url:
+        return fetch_url_with_powershell(url, body=body, timeout=timeout)
     raise RuntimeError(f"Failed to fetch {url}: {last_error}") from last_error
+
+
+def fetch_url_with_powershell(url: str, *, body: bytes | None, timeout: int) -> bytes:
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        out_path = tmp.name
+    env = os.environ.copy()
+    env["FETCH_URL"] = url
+    env["FETCH_OUT"] = out_path
+    env["FETCH_TIMEOUT"] = str(max(timeout, 120))
+    env["FETCH_BODY"] = body.decode("utf-8") if body else ""
+    script = r"""
+$headers = @{ 'User-Agent' = 'Mozilla/5.0' }
+$timeout = [int]$env:FETCH_TIMEOUT
+if ([string]::IsNullOrEmpty($env:FETCH_BODY)) {
+  Invoke-WebRequest -Uri $env:FETCH_URL -UseBasicParsing -Headers $headers -TimeoutSec $timeout -OutFile $env:FETCH_OUT
+} else {
+  Invoke-WebRequest -Uri $env:FETCH_URL -Method Post -Body $env:FETCH_BODY -ContentType 'application/x-www-form-urlencoded' -UseBasicParsing -Headers $headers -TimeoutSec $timeout -OutFile $env:FETCH_OUT
+}
+"""
+    try:
+        completed = subprocess.run(
+            [r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-NoProfile", "-Command", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=max(timeout + 30, 150),
+            check=False,
+        )
+        if completed.returncode != 0:
+            message = (completed.stderr or completed.stdout or "PowerShell request failed").strip()
+            raise RuntimeError(message)
+        with open(out_path, "rb") as fh:
+            return fh.read()
+    finally:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
 
 
 def safe_name(value: str) -> str:

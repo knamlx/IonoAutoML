@@ -219,6 +219,11 @@ __marimo__/
 
 # IonoScope generated data and reports
 data/
+data_2024_2025*/
+cleaned_2024_2025/
+normalized_2024_2025*/
+logs_archive/
+_old_data_to_delete/
 data_test*/
 test_output/
 test_output_*/
