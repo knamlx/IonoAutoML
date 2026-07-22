@@ -1,0 +1,62 @@
+{
+  "station_set_id": "exploration_v0.1",
+  "description": "Stations marked good or usable in the top-55 quality scan for first exploratory experiments.",
+  "source_quality_scan": "quality_scan_top55_5min/reports/station_quality_summary.csv",
+  "target_frequency": "5min",
+  "period": {
+    "start": "2024-01-01T00:00:00Z",
+    "end": "2026-01-01T00:00:00Z"
+  },
+  "included_quality_classes": [
+    "good",
+    "usable"
+  ],
+  "station_count": 41,
+  "stations": [
+    "AU930",
+    "BR52P",
+    "CB53N",
+    "CS31K",
+    "DB049",
+    "DW41K",
+    "EA036",
+    "EB040",
+    "HO54K",
+    "JB57N",
+    "JR055",
+    "ND61R",
+    "NI63",
+    "PE43K",
+    "PQ052",
+    "SO148",
+    "TV51R",
+    "WP937",
+    "AL945",
+    "AS00Q",
+    "AT138",
+    "BC840",
+    "CAJ2M",
+    "CGK21",
+    "EA653",
+    "EG931",
+    "FF051",
+    "GM037",
+    "GR13L",
+    "IC437",
+    "JJ433",
+    "LL721",
+    "LM42B",
+    "MHJ45",
+    "NI135",
+    "PA836",
+    "THJ76",
+    "TR169",
+    "TR170",
+    "VT139",
+    "WA619"
+  ],
+  "notes": [
+    "Use for exploratory experiments and visual checks.",
+    "Strict dataset selection remains separate and currently has fewer stations."
+  ]
+}

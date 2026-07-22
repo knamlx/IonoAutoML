@@ -1,2 +1,16 @@
-# The collector uses Python standard library only.
-# Python 3.11+ is required because it uses tomllib.
+# Python 3.11+ is required because collect_hf_data.py uses tomllib.
+
+# Data preparation and quality reports
+numpy
+pandas
+
+# Notebook visual checks and publication-style figures
+plotly
+nbformat
+kaleido
+lxml
+html5lib
+beautifulsoup4
+
+# Tests
+pytest

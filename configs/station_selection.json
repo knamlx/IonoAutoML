@@ -1,0 +1,28 @@
+{
+  "target": "foF2",
+  "minimum_original_coverage_percent": 50.0,
+  "maximum_missing_percent": 40.0,
+  "quality_classes": {
+    "good": {
+      "minimum_original_coverage_percent": 80.0,
+      "maximum_missing_percent": 20.0
+    },
+    "usable": {
+      "minimum_original_coverage_percent": 40.0,
+      "maximum_missing_percent": 60.0
+    },
+    "weak": {
+      "minimum_original_coverage_percent": 1.0,
+      "maximum_missing_percent": 99.0
+    }
+  },
+  "hard_exclude_only_if_no_target_data": true,
+  "minimum_years_present": 2,
+  "minimum_seasons_present": 3,
+  "maximum_longest_gap_days": 60,
+  "require_test_period_data": true,
+  "test_period": {
+    "start": "2025-10-01T00:00:00Z",
+    "end": "2026-01-01T00:00:00Z"
+  }
+}

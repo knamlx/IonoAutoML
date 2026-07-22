@@ -1,0 +1,107 @@
+station,country,location,system_type,latitude,longitude,longitude_180,build_date,giro_link,metadata_source
+,Iceland,Keflavik,D128,42.4,288.5,-71.5,1970,,LDI station list
+AA343,Kazakhstan,Almaty,DPS4D,43.18,76.95,76.95,2024-06,,LDI station list
+AH223,India,Ahmedabad,DPS4D,23.0,72.5,72.5,2010-04,https://giro.uml.edu/ionoweb/?station=AH223,LDI station list
+AL945,USA,"Alpena, MI",NEXION,45.07,276.44,-83.56,2012-05,https://giro.uml.edu/ionoweb/?station=AL945,LDI station list
+AN438,Korea,Anyang,D256,37.39,126.95,126.95,1992,https://giro.uml.edu/ionoweb/?station=AN438,LDI station list
+AS00Q,UK,Ascension Island,DISS,-8.0,346.0,-14.0,1992,,LDI station list
+AT138,Greece,Athens,D128P,38.0,23.5,23.5,1975,,LDI station list
+AU930,USA,"Austin, TX",DISS,30.4,262.3,-97.69999999999999,1989,https://giro.uml.edu/ionoweb/?station=AU930,LDI station list
+AW426,Japan,Awase,NEXION,26.32,127.84,127.84,2022-07,https://giro.uml.edu/ionoweb/?station=AW426,LDI station list
+BC840,USA,"Boulder, Co",DISS,40.0,254.7,-105.30000000000001,1989,https://giro.uml.edu/ionoweb/?station=BC840,LDI station list
+BE145,Serbia,Belgrade,DPS4D,44.63,20.75,20.75,2008-10,,LDI station list
+BLJ03,Brazil,Belem,DPS4D,1.43,311.56,-48.44,2012-06,https://giro.uml.edu/ionoweb/?station=BLJ03,LDI station list
+BP440,China,Beijing,D256,40.3,116.2,116.2,1988,https://giro.uml.edu/ionoweb/?station=BP440,LDI station list
+BR52P,Australia,Brisbane,,-27.53,152.92,152.92,,https://giro.uml.edu/ionoweb/?station=BR52P,manual: SWS/ASWFC catalogue
+BV53Q,Australia,Bundoora,DPS4,-37.72,145.05,145.05,2000,https://giro.uml.edu/ionoweb/?station=BV53Q,LDI station list
+BVJ03,Brazil,Boa Vista,DPS4D,2.8,299.3,-60.69999999999999,2011-11,https://giro.uml.edu/ionoweb/?station=BVJ03,LDI station list
+CAJ2M,Brazil,Cachoeira Paulista,DPS4D,-22.7,315.0,-45.0,2012-06,https://giro.uml.edu/ionoweb/?station=CAJ2M,LDI station list
+CB53N,Australia,Canberra,,-35.32,149.0,149.0,,https://giro.uml.edu/ionoweb/?station=CB53N,manual: SWS/ASWFC catalogue
+CGK21,Brazil,Campo Grande,DPS4D,-20.5,305.0,-55.0,2011-11,https://giro.uml.edu/ionoweb/?station=CGK21,LDI station list
+CO764,USA,"College, AK",DISS,64.9,212.0,-148.0,1989,https://giro.uml.edu/ionoweb/?station=CO764,LDI station list
+CS31K,Australia,Cocos Island,,-12.18,96.83,96.83,,https://giro.uml.edu/ionoweb/?station=CS31K,manual: ISWI/SWS catalogue
+CS999,USA,"Colorado Springs, CO",NEXION,38.83,255.18,-104.82,2011-03,,LDI station list
+DB049,Belgium,Dourbes,D256,50.1,4.6,4.6,1986,,LDI station list
+DH224,UAE,Al Dafra,NEXION,24.24,54.58,54.58,2021-07,https://giro.uml.edu/ionoweb/?station=DH224,LDI station list
+DV36Q,Antarctica,Davis Base,DPS4,-68.6,78.0,78.0,1994,,LDI station list
+DW41K,Australia,Darwin,,-12.45,130.95,130.95,,https://giro.uml.edu/ionoweb/?station=DW41K,manual: SWS/ASWFC catalogue
+EA036,Spain,El Arenosillo,D256,37.1,353.3,-6.699999999999989,1993,https://giro.uml.edu/ionoweb/?station=EA036,LDI station list
+EA653,USA,"Eareckson, AK",NEXION,52.73,185.92,-174.08,2016-07,https://giro.uml.edu/ionoweb/?station=EA653,LDI station list
+EB040,Spain,Roquetes / Tortosa,D256,40.8,0.5,0.5,1986,https://giro.uml.edu/ionoweb/?station=EB040,LDI station list
+EG931,USA,Eglin AFB,,30.5,-86.5,-86.5,,https://giro.uml.edu/ionoweb/?station=EG931,manual: DIDBase station list/search
+EI764,USA,Eglin AFB,DISS,30.5,273.5,-86.5,1989,https://giro.uml.edu/ionoweb/?station=PRJ18,LDI station list
+FF051,UK,Fairford,DISS,51.7,358.5,-1.5,1990,https://giro.uml.edu/ionoweb/?station=FF051,LDI station list
+FZA0M,Brazil,Fortaleza,DPS4,-3.9,321.6,-38.39999999999998,2001-01,https://giro.uml.edu/ionoweb/?station=FZA0M,LDI station list
+GA313,India,Gadanki,DPS4D,13.46,79.17,79.17,2013-10,https://giro.uml.edu/ionoweb/?station=GA313,LDI station list
+GA762,USA,"Gakona, AK",DPS4,62.38,215.0,-145.0,1991,https://giro.uml.edu/ionoweb/?station=GA762,LDI station list
+GM037,Italy,Gibilmanna,DPS4D,37.9,14.0,14.0,2021-11,https://giro.uml.edu/ionoweb/?station=GM037,LDI station list
+GR13L,South Africa,Grahamstown,DPS4,-33.3,26.5,26.5,1996,https://giro.uml.edu/ionoweb/?station=GR13L,LDI station list
+GSJ53,Canada,Goose Bay,D128PS,53.3,299.7,-60.30000000000001,1977,,LDI station list
+GU513,USA,Guam,NEXION,13.62,144.86,144.86,2011-06,https://giro.uml.edu/ionoweb/?station=GU513,LDI station list
+HA419,China,Hainan Is.,DPS4,19.4,109.0,109.0,2002,https://giro.uml.edu/ionoweb/?station=HA419,LDI station list
+HE13N,South Africa,Hermanus,DPS4D,-34.42,19.22,19.22,2008-05,https://giro.uml.edu/ionoweb/?station=HE13N,LDI station list
+HO54K,Australia,Hobart,,-42.92,147.32,147.32,,https://giro.uml.edu/ionoweb/?station=HO54K,manual: SWS/ASWFC catalogue
+IC437,South Korea,Icheon,DPS4D,37.14,127.54,127.54,2023-09,https://giro.uml.edu/ionoweb/?station=IC437,LDI station list
+IF843,USA,"Idaho National Lab, ID",DPS4D,43.81,247.32,-112.68,2011-11,https://giro.uml.edu/ionoweb/?station=IF843,LDI station list
+IL008,Nigeria,Ilorin,DPS4,8.5,4.5,4.5,2005-09,https://giro.uml.edu/ionoweb/?station=IL008,LDI station list
+IR352,Russia,Irkutsk,DPS4,52.4,104.3,104.3,2002,https://giro.uml.edu/ionoweb/?station=IR352,LDI station list
+JB57N,Antarctica,Jang Bogo,,-74.62,164.23,164.23,,https://giro.uml.edu/ionoweb/?station=JB57N,manual: Jang Bogo dataset metadata
+JI91J,Peru,Jicamarca,DPS4D,-12.0,283.2,-76.80000000000001,2024,,LDI station list
+JJ433,South Korea,Jeju Island,DPS4D,33.43,126.3,126.3,2023-10,https://giro.uml.edu/ionoweb/?station=JJ433,LDI station list
+JR055,Germany,Juliusruh,DPS4,54.6,13.4,13.4,1999,https://giro.uml.edu/ionoweb/?station=JR055,LDI station list
+KJ609,Marshall Islands,Kwajalein Is,D128PS,9.4,167.2,167.2,1977,,LDI station list
+KR835,USA,"Kirtland AFB, NM",DPS4D,35.0,253.47,-106.53,2011-08,https://giro.uml.edu/ionoweb/?station=KR835,LDI station list
+KS759,USA,"King Salmon, AK",DISS,58.4,203.6,-156.4,1990,https://giro.uml.edu/ionoweb/?station=KS759,LDI station list
+LAA38,Portugal,Lajes,NEXION,38.77,332.91,-27.089999999999975,2024-04,https://giro.uml.edu/ionoweb/?station=LAA38,LDI station list
+LD160,Russia,Saint Petersburg,DPS4D,60.0,30.7,30.7,2012-09,https://giro.uml.edu/ionoweb/?station=LD160,LDI station list
+LL721,USA,Lualualei,NEXION,21.43,201.85,-158.15,2012-03,https://giro.uml.edu/ionoweb/?station=LL721,LDI station list
+LL999,USA,"Lexington, MA",DPS4D,42.46,288.74,-71.25999999999999,2013-09,,LDI station list
+LM42B,Australia,Learmonth,DISS,-21.8,114.0,114.0,1989,https://giro.uml.edu/ionoweb/?station=LM42B,LDI station list
+LV12P,South Africa,Louisvale,DPS4,-28.5,21.2,21.2,1996,https://giro.uml.edu/ionoweb/?station=LV12P,LDI station list
+ME929,USA,"Melrose, FL",DPS4D,29.7,278.01,-81.99000000000001,2013-08,https://giro.uml.edu/ionoweb/?station=ME929,LDI station list
+MH453,China,Mohe,DPS4D,52.0,122.52,122.52,2009-12,https://giro.uml.edu/ionoweb/?station=MH453,LDI station list
+MHJ45,USA,"Millstone Hill, MA",D256,42.6,288.5,-71.5,1987,,LDI station list
+MIJ42,USA,"Bedford, MA",DPS4D,42.5,288.8,-71.19999999999999,2022-11,,LDI station list
+MO155,Russia,Moscow,DPS4,55.47,37.3,37.3,2006-10,https://giro.uml.edu/ionoweb/?station=MO155,LDI station list
+MU12K,South Africa,Madimbo,DPS4D,-22.39,30.88,30.88,2010-12,https://giro.uml.edu/ionoweb/?station=MU12K,LDI station list
+MU834,Pakistan,Multan,DPS4,33.03,72.01,72.01,2007-10,https://giro.uml.edu/ionoweb/?station=MU230,LDI station list
+N0369,Russia,Norilisk,DPS4,69.4,88.1,88.1,2002,https://giro.uml.edu/ionoweb/?station=NO369,LDI station list
+ND328,India,New Delhi,DPS4D,28.64,77.17,77.17,2013-06,,LDI station list
+ND61R,Niue,Niue,,-19.07,190.07,-169.93,,https://giro.uml.edu/ionoweb/?station=ND61R,manual: SWS/ASWFC catalogue
+NDA81,Greenland,Nord,DPS4D,81.4,342.5,-17.5,2014-04,https://giro.uml.edu/ionoweb/?station=NDA81,LDI station list
+NI135,Cyprus,Nicosia,DPS4D,35.03,33.16,33.16,2009-06,https://giro.uml.edu/ionoweb/?station=NI135,LDI station list
+NI63,Australia,Norfolk Island,,-29.03,167.97,167.97,,https://giro.uml.edu/ionoweb/?station=NI63,manual: SWS/ASWFC catalogue
+NQJ61,Greenland,Narssarssuaq,DISS,61.2,314.6,-45.39999999999998,1989,https://giro.uml.edu/ionoweb/?station=NQJ61,LDI station list
+OK426,Japan,Okinawa,DPS4,26.68,128.15,128.15,2001,,LDI station list
+PA836,USA,Vandenberg AFB,DISS,34.7,239.4,-120.6,1989,https://giro.uml.edu/ionoweb/?station=PA836,LDI station list
+PE43K,Australia,Perth,,-31.94,115.95,115.95,,https://giro.uml.edu/ionoweb/?station=PE43K,manual: SWS/ASWFC catalogue
+PF765,USA,"Poker Flat, AK",DPS4D,65.13,212.55,-147.45,2018-04,https://giro.uml.edu/ionoweb/?station=PF765,LDI station list
+PQ052,Czech Republic,Pruhonice,DPS4,50.0,14.6,14.6,2003,https://giro.uml.edu/ionoweb/?station=PQ052,LDI station list
+PRJ18,USA,Ramey AFB,DISS,18.5,292.9,-67.10000000000002,1989,https://giro.uml.edu/ionoweb/?station=PRJ18,LDI station list
+PSJ5J,Falkland Islands,Port Stanley,DPS1,-51.6,302.1,-57.89999999999998,1995,https://giro.uml.edu/ionoweb/?station=PSJ5J,LDI station list
+RL052,UK,Chilton,DPS1,51.5,359.4,-0.6000000000000227,1994-07,https://giro.uml.edu/ionoweb/?station=RL052,LDI station list
+RO041,Italy,Rome,D128P,41.9,12.5,12.5,1974,,LDI station list
+SA418,China,Sanya,DPS4D,18.34,109.42,109.42,2010-08,https://giro.uml.edu/ionoweb/?station=SA418,LDI station list
+SA929,USA,"San Antonio, TX",DPS4D,29.45,261.39,-98.61000000000001,2017-10,,LDI station list
+SAA0K,Brazil,Sao Luis,DPS4,-2.6,315.8,-44.19999999999999,2001,https://giro.uml.edu/ionoweb/?station=SAA0K,LDI station list
+SE834,USA,"Sevilleta, NM",DPS4D,34.35,253.12,-106.88,2015-07,,LDI station list
+SH427,China,Shaoyang,DPS4D,26.86,111.5,111.5,2010-08,,LDI station list
+SMJ67,Greenland,Sondrestrom,DISS,67.0,309.3,-50.69999999999999,1988,https://giro.uml.edu/ionoweb/?station=SMJ67,LDI station list
+SMK29,Brazil,Santa Maria,DPS4D,-29.73,306.29,-53.70999999999998,2016-08,https://giro.uml.edu/ionoweb/?station=SMK29,LDI station list
+SN437,Korea,Osan AFB,DISS,37.1,127.0,127.0,1990,,LDI station list
+SO148,Hungary,Sopron,DPS4D,47.63,16.72,16.72,2018-01,https://giro.uml.edu/ionoweb/?station=SO148,LDI station list
+THJ76,Greenland,Thule,NEXION,76.54,291.56,-68.44,2014-11,https://giro.uml.edu/ionoweb/?station=THJ76,LDI station list
+THJ77,Greenland,Qaanaaq,DISS,77.5,290.8,-69.19999999999999,1988,,LDI station list
+TM308,India,Trivandrium,DPS4D,8.54,76.87,76.87,2008-10,https://giro.uml.edu/ionoweb/?station=TM308,LDI station list
+TR0P2,Norway,Troll,DPS4D,-72.01,2.53,2.53,2023-08,https://giro.uml.edu/ionoweb/?station=TR0P2,LDI station list
+TR169,Norway,Tromso,DPS4,69.9,19.2,19.2,1993,https://giro.uml.edu/ionoweb/?station=TR169,LDI station list
+TR170,Norway,Tromso EISCAT,,69.6,19.2,19.2,,https://giro.uml.edu/ionoweb/?station=TR170,manual: published ionosonde station table
+TV51R,Australia,Townsville,,-19.63,146.85,146.85,,https://giro.uml.edu/ionoweb/?station=TV51R,manual: SWS/ASWFC catalogue
+VT139,Italy,San Vito,DISS,40.6,17.8,17.8,1990,https://giro.uml.edu/ionoweb/?station=VT139,LDI station list
+WA619,USA,Wake,NEXION,19.29,166.65,166.65,2010-01,https://giro.uml.edu/ionoweb/?station=WA619,LDI station list
+WP937,USA,"Wallops Island, VA",D256,37.9,284.5,-75.5,1986,https://giro.uml.edu/ionoweb/?station=WP937,LDI station list
+WU430,China,Wuhan,D256,30.5,114.4,114.4,1993,https://giro.uml.edu/ionoweb/?station=WU430,LDI station list
+XI434,China,Xinxiang,DPS4,35.3,113.92,113.92,2006-03,https://giro.uml.edu/ionoweb/?station=XI434,LDI station list
+YA462,Russia,Yakutsk,DPS4,62.0,129.6,129.6,2002,https://giro.uml.edu/ionoweb/?station=YA462,LDI station list
+ZH466,Russia,Zhigansk,DPS4,66.8,123.4,123.4,2002,https://giro.uml.edu/ionoweb/?station=ZH466,LDI station list
+ZS36R,Antarctica,Zhongshan,DPS4,-69.4,76.4,76.4,1994,https://giro.uml.edu/ionoweb/?station=ZS36R,LDI station list

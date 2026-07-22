@@ -222,6 +222,8 @@ data/
 data_2024_2025*/
 cleaned_2024_2025/
 normalized_2024_2025*/
+quality_scan*/
+figures/
 logs_archive/
 _old_data_to_delete/
 data_test*/
