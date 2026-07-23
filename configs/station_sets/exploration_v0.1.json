@@ -1,8 +1,8 @@
 {
   "station_set_id": "exploration_v0.1",
   "description": "Stations marked good or usable in the top-55 quality scan for first exploratory experiments.",
-  "source_quality_scan": "quality_scan_top55_5min/reports/station_quality_summary.csv",
-  "target_frequency": "5min",
+  "source_quality_scan": "quality_scan_exploration_v0_1_15min/reports/station_quality_summary.csv",
+  "target_frequency": "15min",
   "period": {
     "start": "2024-01-01T00:00:00Z",
     "end": "2026-01-01T00:00:00Z"

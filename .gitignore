@@ -224,6 +224,9 @@ cleaned_2024_2025/
 normalized_2024_2025*/
 quality_scan*/
 figures/
+features_*/
+features_test_*/
+_reference_repos/
 logs_archive/
 _old_data_to_delete/
 data_test*/

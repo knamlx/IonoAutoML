@@ -1,5 +1,5 @@
 {
-  "target_frequency": "5min",
+  "target_frequency": "15min",
   "timezone": "UTC",
   "station_selection": {
     "target": "foF2",
