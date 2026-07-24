@@ -1,0 +1,92 @@
+{
+  "experiment_id": "baseline_v0.1",
+  "feature_dir": "features_2024_2025_exploration_v0_1_15min",
+  "output_dir": "artifacts/baseline_v0.1",
+  "dataset_step": "15min",
+  "evaluation_mode": "fixed_year_split",
+  "stations": "all",
+  "target": "foF2",
+  "horizons": [
+    "15min",
+    "1h",
+    "3h",
+    "6h",
+    "24h"
+  ],
+  "train_start": "2024-01-01T00:00:00Z",
+  "train_end": "2025-01-01T00:00:00Z",
+  "validation_start": "2024-10-01T00:00:00Z",
+  "validation_end": "2025-01-01T00:00:00Z",
+  "test_start": "2025-01-01T00:00:00Z",
+  "test_end": "2026-01-01T00:00:00Z",
+  "walk_forward_train_days": [
+    7,
+    21,
+    28
+  ],
+  "minimum_train_rows": 48,
+  "minimum_eval_rows": 2,
+  "minimum_feature_coverage": 0.3,
+  "models": [
+    "persistence_state",
+    "persistence_horizon_lag",
+    "seasonal_24h_lag",
+    "LinearRegression",
+    "ElasticNet",
+    "RandomForest",
+    "XGBoost",
+    "CatBoost"
+  ],
+  "automl": {
+    "enabled": true,
+    "method": "optuna_tpe_pruning",
+    "models": [
+      "ElasticNet",
+      "RandomForest",
+      "XGBoost",
+      "CatBoost"
+    ],
+    "metric": "RMSE",
+    "n_trials": 10,
+    "random_state": 42,
+    "storage": "sqlite:///artifacts/baseline_v0.1/optuna.db",
+    "train_final_on_train_validation": true,
+    "export_trials_parquet": true,
+    "export_predictions_parquet": true,
+    "save_models": true
+  },
+  "model_params": {
+    "ElasticNet": {
+      "alpha": 1.0,
+      "l1_ratio": 0.5,
+      "max_iter": 5000,
+      "random_state": 42
+    },
+    "RandomForest": {
+      "n_estimators": 300,
+      "max_depth": 8,
+      "min_samples_leaf": 3,
+      "n_jobs": 1,
+      "random_state": 42
+    },
+    "XGBoost": {
+      "objective": "reg:squarederror",
+      "n_estimators": 300,
+      "max_depth": 5,
+      "learning_rate": 0.05,
+      "n_jobs": 1,
+      "verbosity": 0,
+      "random_state": 42
+    },
+    "CatBoost": {
+      "loss_function": "RMSE",
+      "iterations": 500,
+      "depth": 6,
+      "learning_rate": 0.05,
+      "l2_leaf_reg": 3.0,
+      "random_seed": 42,
+      "thread_count": 1,
+      "verbose": false
+    }
+  }
+}

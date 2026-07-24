@@ -221,6 +221,8 @@ __marimo__/
 data/
 data_2024_2025*/
 cleaned_2024_2025/
+datasets/
+artifacts/
 normalized_2024_2025*/
 quality_scan*/
 figures/

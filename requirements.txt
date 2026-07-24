@@ -6,11 +6,23 @@ pandas
 
 # Notebook visual checks and publication-style figures
 plotly
+matplotlib
+seaborn
 nbformat
 kaleido
 lxml
 html5lib
 beautifulsoup4
+tabulate
+
+# ML baselines and result storage
+scikit-learn
+joblib
+xgboost
+catboost
+optuna
+shap
+pyarrow
 
 # Tests
 pytest
