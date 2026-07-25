@@ -15,6 +15,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import ElasticNet, LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import ParameterGrid, ParameterSampler
 from xgboost import XGBRegressor
 
 
@@ -46,6 +47,49 @@ def horizon_to_hours(horizon: str) -> float:
     return pd.Timedelta(horizon) / pd.Timedelta(hours=1)
 
 
+def latitude_zone(latitude: float | int | None) -> str | None:
+    if latitude is None or not np.isfinite(latitude):
+        return None
+    lat = float(latitude)
+    if lat <= -60:
+        return "S_high"
+    if lat <= -30:
+        return "S_mid"
+    if lat < 30:
+        return "Low"
+    if lat < 60:
+        return "N_mid"
+    return "N_high"
+
+
+def station_context(station: str, frame: pd.DataFrame | None = None) -> dict[str, Any]:
+    context: dict[str, Any] = {"station": station}
+    if frame is not None and not frame.empty:
+        for column in ["latitude", "longitude", "geomagnetic_latitude", "geomagnetic_longitude"]:
+            if column in frame.columns:
+                value = pd.to_numeric(frame[column], errors="coerce").dropna()
+                if not value.empty:
+                    context[column] = float(value.iloc[0])
+    if "latitude" not in context:
+        metadata_path = Path("configs/stations_metadata.csv")
+        if metadata_path.exists():
+            metadata = pd.read_csv(metadata_path)
+            row = metadata[metadata["station"] == station]
+            if not row.empty:
+                for column in ["country", "location", "latitude", "longitude"]:
+                    if column in row.columns and pd.notna(row.iloc[0][column]):
+                        context[column] = row.iloc[0][column].item() if hasattr(row.iloc[0][column], "item") else row.iloc[0][column]
+    context["latitude_zone"] = latitude_zone(context.get("latitude"))
+    return context
+
+
+def enrich_rows(rows: list[dict[str, Any]], context: dict[str, Any]) -> list[dict[str, Any]]:
+    enriched = []
+    for row in rows:
+        enriched.append({**{k: v for k, v in context.items() if k != "station"}, **row})
+    return enriched
+
+
 def as_utc_timestamp(value: str | pd.Timestamp) -> pd.Timestamp:
     ts = pd.Timestamp(value)
     if ts.tzinfo is None:
@@ -64,8 +108,8 @@ def resolve_stations(config: dict[str, Any], station_override: str | None = None
 
 
 def iter_test_days(config: dict[str, Any]) -> list[pd.Timestamp]:
-    start = as_utc_timestamp(config["test_start"])
-    end = as_utc_timestamp(config["test_end"])
+    start = as_utc_timestamp(config.get("ml_date_start", config["test_start"]))
+    end = as_utc_timestamp(config.get("ml_date_end", config["test_end"]))
     if end <= start:
         raise ValueError("test_end must be after test_start.")
     return list(pd.date_range(start, end - pd.Timedelta(days=1), freq="1D"))
@@ -79,29 +123,58 @@ def split_walk_forward_window(
     forecast_horizon: str,
     dataset_step: str,
     time_column: str = "time_utc",
+    validation_days: int | None = None,
+    test_h: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, pd.Timestamp]]:
     step = pd.Timedelta(dataset_step)
     forecast_delta = pd.Timedelta(forecast_horizon)
     if forecast_delta < step or forecast_delta % step != pd.Timedelta(0):
         raise ValueError(f"forecast_horizon {forecast_horizon!r} is not compatible with dataset_step {dataset_step!r}.")
 
+    time = frame[time_column]
     test_start = as_utc_timestamp(current_day)
-    test_end = test_start + pd.Timedelta(days=1) - step
-    train_end = test_start - step
+    if validation_days is None:
+        test_end = test_start + pd.Timedelta(days=1) - step
+        train_end = test_start - step
+        train_start = train_end - pd.Timedelta(days=train_days) + step
+        safe_train_end = train_end - forecast_delta
+        train = frame[(time >= train_start) & (time <= safe_train_end)].copy()
+        validation = pd.DataFrame(columns=frame.columns)
+        test = frame[(time >= test_start) & (time <= test_end)].copy()
+        bounds = {
+            "train_start": train_start,
+            "train_end": train_end,
+            "safe_train_end": safe_train_end,
+            "test_start": test_start,
+            "test_end": test_end,
+        }
+        return train, validation, test, bounds
+
+    resolved_test_h = int(test_h or 24)
+    test_delta = pd.Timedelta(hours=resolved_test_h)
+    if test_delta < step:
+        raise ValueError(f"test_h must be at least one dataset_step ({step}).")
+    test_end = test_start + test_delta - step
+    val_end = test_start - forecast_delta - step
+    val_start = val_end - pd.Timedelta(days=int(validation_days)) + step
+    train_end = val_start - step
     train_start = train_end - pd.Timedelta(days=train_days) + step
     safe_train_end = train_end - forecast_delta
-
-    time = frame[time_column]
     train = frame[(time >= train_start) & (time <= safe_train_end)].copy()
+    validation = frame[(time >= val_start) & (time <= val_end)].copy()
     test = frame[(time >= test_start) & (time <= test_end)].copy()
     bounds = {
         "train_start": train_start,
         "train_end": train_end,
         "safe_train_end": safe_train_end,
+        "validation_start": val_start,
+        "validation_end": val_end,
+        "validation_label_start": val_start + forecast_delta,
+        "validation_label_end": val_end + forecast_delta,
         "test_start": test_start,
         "test_end": test_end,
     }
-    return train, pd.DataFrame(columns=frame.columns), test, bounds
+    return train, validation, test, bounds
 
 
 def split_fixed_year(
@@ -165,12 +238,16 @@ def split_frames(
     if mode == "walk_forward_daily":
         if current_day is None or train_days is None:
             raise ValueError("walk_forward_daily requires current_day and train_days.")
+        automl = config.get("automl", {})
+        use_validation = bool(automl.get("enabled", False))
         return split_walk_forward_window(
             frame,
             current_day=current_day,
             train_days=train_days,
             forecast_horizon=horizon,
             dataset_step=config["dataset_step"],
+            validation_days=int(automl.get("val_days", 1)) if use_validation else None,
+            test_h=int(automl.get("test_h", 24)) if use_validation else None,
         )
     raise ValueError(f"Unsupported evaluation_mode: {mode!r}")
 
@@ -180,7 +257,7 @@ def split_iterations(config: dict[str, Any]) -> list[dict[str, Any]]:
         return [{"split_id": "fixed_2024_train_2025_test", "train_days": None, "test_day": None}]
     return [
         {"split_id": f"{day.date().isoformat()}_{train_days}d", "train_days": int(train_days), "test_day": day}
-        for train_days in config.get("walk_forward_train_days", [])
+        for train_days in config.get("window_list", config.get("walk_forward_train_days", []))
         for day in iter_test_days(config)
     ]
 
@@ -261,6 +338,45 @@ def impute_frames(
     return train_imputed, val_imputed, test_imputed
 
 
+def feature_importance_rows(
+    estimator: object,
+    features: list[str],
+    *,
+    station: str,
+    horizon: str,
+    split_id: str,
+    train_days: int | None,
+    model_name: str,
+) -> list[dict[str, Any]]:
+    values = None
+    kind = None
+    if hasattr(estimator, "feature_importances_"):
+        values = getattr(estimator, "feature_importances_")
+        kind = "feature_importance"
+    elif hasattr(estimator, "coef_"):
+        values = np.ravel(getattr(estimator, "coef_"))
+        kind = "coefficient"
+    if values is None:
+        return []
+    rows = []
+    for feature, value in zip(features, values):
+        rows.append(
+            {
+                "station": station,
+                "horizon": horizon,
+                "horizon_hours": horizon_to_hours(horizon),
+                "split_id": split_id,
+                "train_days": train_days,
+                "model": model_name,
+                "feature": feature,
+                "importance": float(value),
+                "importance_abs": float(abs(value)),
+                "importance_kind": kind,
+            }
+        )
+    return rows
+
+
 def fit_predict_ml(
     train: pd.DataFrame,
     test: pd.DataFrame,
@@ -269,19 +385,19 @@ def fit_predict_ml(
     selected_features: list[str],
     model_name: str,
     config: dict[str, Any],
-) -> tuple[pd.Series, int]:
+) -> tuple[pd.Series, int, object | None]:
     if not selected_features:
-        return pd.Series(index=test.index, dtype=float), 0
+        return pd.Series(index=test.index, dtype=float), 0, None
 
     y_train = pd.to_numeric(train[target_column], errors="coerce")
     valid_train = y_train.notna()
     if valid_train.sum() < int(config["minimum_train_rows"]):
-        return pd.Series(index=test.index, dtype=float), int(valid_train.sum())
+        return pd.Series(index=test.index, dtype=float), int(valid_train.sum()), None
 
     train_imputed, _, test_imputed = impute_frames(train.loc[valid_train], test, selected_features)
     estimator = make_estimator(model_name, config)
     estimator.fit(train_imputed, y_train.loc[valid_train])
-    return pd.Series(estimator.predict(test_imputed), index=test.index), int(valid_train.sum())
+    return pd.Series(estimator.predict(test_imputed), index=test.index), int(valid_train.sum()), estimator
 
 
 def objective_direction(metric: str) -> str:
@@ -299,56 +415,234 @@ def objective_value(metric: str, y_true: pd.Series, y_pred: pd.Series) -> float:
     return float(value)
 
 
-def sample_optuna_params(model_name: str, trial: optuna.Trial) -> dict[str, Any]:
+def suggest_from_space(trial: optuna.Trial, name: str, spec: dict[str, Any]) -> Any:
+    param_type = spec["type"]
+    if param_type == "float":
+        return trial.suggest_float(
+            name,
+            float(spec["low"]),
+            float(spec["high"]),
+            log=bool(spec.get("log", False)),
+            step=spec.get("step"),
+        )
+    if param_type == "int":
+        return trial.suggest_int(name, int(spec["low"]), int(spec["high"]), step=int(spec.get("step", 1)))
+    if param_type == "categorical":
+        return trial.suggest_categorical(name, list(spec["choices"]))
+    raise ValueError(f"Unsupported hyperparameter type for {name}: {param_type!r}")
+
+
+def configured_optuna_params(model_name: str, trial: optuna.Trial, config: dict[str, Any]) -> dict[str, Any]:
+    spaces = config.get("hyperparameter_spaces", {})
+    if model_name not in spaces:
+        return {}
+    return {name: suggest_from_space(trial, name, spec) for name, spec in spaces[model_name].items()}
+
+
+def grid_values_from_space(spec: dict[str, Any]) -> list[Any]:
+    if "values" in spec:
+        return list(spec["values"])
+    param_type = spec["type"]
+    if param_type == "categorical":
+        return list(spec["choices"])
+    if param_type == "int":
+        low = int(spec["low"])
+        high = int(spec["high"])
+        step = int(spec.get("step", 1))
+        values = list(range(low, high + 1, step))
+        if len(values) <= 5:
+            return values
+        return sorted({values[0], values[len(values) // 2], values[-1]})
+    if param_type == "float":
+        low = float(spec["low"])
+        high = float(spec["high"])
+        if bool(spec.get("log", False)) and low > 0:
+            mid = float(np.sqrt(low * high))
+        else:
+            mid = (low + high) / 2
+        return [low, mid, high]
+    raise ValueError(f"Unsupported hyperparameter type: {param_type!r}")
+
+
+def parameter_grid_from_config(model_name: str, config: dict[str, Any]) -> dict[str, list[Any]]:
+    spaces = config.get("hyperparameter_spaces", {})
+    if model_name not in spaces:
+        return {}
+    return {name: grid_values_from_space(spec) for name, spec in spaces[model_name].items()}
+
+
+def fixed_model_params(model_name: str) -> dict[str, Any]:
     if model_name == "ElasticNet":
-        return {
-            "alpha": trial.suggest_float("alpha", 1e-4, 1e2, log=True),
-            "l1_ratio": trial.suggest_float("l1_ratio", 0.01, 0.99),
-            "max_iter": 10000,
-            "random_state": 42,
-        }
+        return {"max_iter": 10000, "random_state": 42}
     if model_name == "RandomForest":
-        return {
-            "n_estimators": trial.suggest_int("n_estimators", 200, 1200, step=100),
-            "max_depth": trial.suggest_int("max_depth", 4, 20),
-            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10),
-            "min_samples_split": trial.suggest_int("min_samples_split", 2, 12),
-            "max_features": trial.suggest_float("max_features", 0.3, 1.0),
-            "bootstrap": trial.suggest_categorical("bootstrap", [True, False]),
-            "n_jobs": 1,
-            "random_state": 42,
-        }
+        return {"n_jobs": 1, "random_state": 42}
     if model_name == "XGBoost":
-        return {
-            "objective": "reg:squarederror",
-            "n_estimators": trial.suggest_int("n_estimators", 200, 1200, step=100),
-            "max_depth": trial.suggest_int("max_depth", 3, 8),
-            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.15, log=True),
-            "min_child_weight": trial.suggest_int("min_child_weight", 1, 15),
-            "subsample": trial.suggest_float("subsample", 0.5, 1.0),
-            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.4, 1.0),
-            "gamma": trial.suggest_float("gamma", 0.0, 5.0),
-            "reg_alpha": trial.suggest_float("reg_alpha", 0.0, 5.0),
-            "reg_lambda": trial.suggest_float("reg_lambda", 1.0, 20.0),
-            "n_jobs": 1,
-            "verbosity": 0,
-            "random_state": 42,
-        }
+        return {"objective": "reg:squarederror", "n_jobs": 1, "verbosity": 0, "random_state": 42}
     if model_name == "CatBoost":
-        return {
-            "loss_function": "RMSE",
-            "iterations": trial.suggest_int("iterations", 300, 1200, step=100),
-            "depth": trial.suggest_int("depth", 4, 10),
-            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
-            "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1.0, 20.0, log=True),
-            "random_strength": trial.suggest_float("random_strength", 0.0, 5.0),
-            "bagging_temperature": trial.suggest_float("bagging_temperature", 0.0, 5.0),
-            "subsample": trial.suggest_float("subsample", 0.5, 1.0),
-            "random_seed": 42,
-            "thread_count": 1,
-            "verbose": False,
-        }
+        return {"random_seed": 42, "thread_count": 1, "verbose": False}
+    return {}
+
+
+def sample_optuna_params(model_name: str, trial: optuna.Trial, config: dict[str, Any]) -> dict[str, Any]:
+    configured = configured_optuna_params(model_name, trial, config)
+    if model_name in OPTUNA_MODELS:
+        return configured | fixed_model_params(model_name)
     raise ValueError(f"Unsupported Optuna model: {model_name}")
+
+
+def candidate_search_params(model_name: str, config: dict[str, Any], method: str, random_state: int) -> list[dict[str, Any]]:
+    grid = parameter_grid_from_config(model_name, config)
+    if not grid:
+        return [fixed_model_params(model_name)]
+    if method == "grid_search":
+        return [dict(params) | fixed_model_params(model_name) for params in ParameterGrid(grid)]
+    if method == "random_search":
+        n_iter = int(config.get("automl", {}).get("n_trials", 25))
+        return [dict(params) | fixed_model_params(model_name) for params in ParameterSampler(grid, n_iter=n_iter, random_state=random_state)]
+    if method == "default":
+        return [default_model_params(model_name, config)]
+    raise ValueError(f"Unsupported search method: {method!r}")
+
+
+def fit_final_tuned_model(
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+    test: pd.DataFrame,
+    *,
+    target_column: str,
+    selected_features: list[str],
+    model_name: str,
+    config: dict[str, Any],
+    params: dict[str, Any],
+) -> tuple[pd.Series, object, int]:
+    automl = config.get("automl", {})
+    final_train = train
+    if automl.get("train_final_on_train_validation", True):
+        final_train = pd.concat([train, validation], axis=0)
+    final_y = pd.to_numeric(final_train[target_column], errors="coerce")
+    valid_final = final_y.notna()
+    train_label_rows = int(valid_final.sum())
+    final_x, _, final_test_x = impute_frames(final_train.loc[valid_final], test, selected_features)
+    final_model = make_estimator(model_name, config, params=params)
+    final_model.fit(final_x, final_y.loc[valid_final])
+    y_pred = pd.Series(final_model.predict(final_test_x), index=test.index)
+    return y_pred, final_model, train_label_rows
+
+
+def run_candidate_search_model(
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+    test: pd.DataFrame,
+    *,
+    target_column: str,
+    selected_features: list[str],
+    model_name: str,
+    config: dict[str, Any],
+    station: str,
+    horizon: str,
+    split_id: str,
+    train_days: int | None,
+    output_dir: Path,
+    method: str,
+) -> tuple[pd.Series, dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int]:
+    automl = config.get("automl", {})
+    metric = automl.get("metric", "RMSE")
+    random_state = int(automl.get("random_state", 42))
+    y_train = pd.to_numeric(train[target_column], errors="coerce")
+    y_val = pd.to_numeric(validation[target_column], errors="coerce")
+    y_test = pd.to_numeric(test[target_column], errors="coerce")
+    valid_train = y_train.notna()
+    valid_val = y_val.notna()
+    valid_test = y_test.notna()
+    if valid_train.sum() < int(config["minimum_train_rows"]) or valid_val.sum() < int(config["minimum_eval_rows"]):
+        return pd.Series(index=test.index, dtype=float), {}, [], [], [], int(valid_train.sum())
+
+    x_train, x_val, _ = impute_frames(train.loc[valid_train], test, selected_features, validation.loc[valid_val])
+    assert x_val is not None
+    y_train_fit = y_train.loc[valid_train]
+    y_val_eval = y_val.loc[valid_val]
+    candidates = candidate_search_params(model_name, config, method, random_state)
+    direction = objective_direction(metric)
+    trial_rows = []
+    best_value = np.inf if direction == "minimize" else -np.inf
+    best_params: dict[str, Any] = {}
+
+    for trial_number, params in enumerate(candidates):
+        model = make_estimator(model_name, config, params=params)
+        model.fit(x_train, y_train_fit)
+        pred = pd.Series(model.predict(x_val), index=y_val_eval.index)
+        value = objective_value(metric, y_val_eval, pred)
+        is_better = value < best_value if direction == "minimize" else value > best_value
+        if is_better:
+            best_value = value
+            best_params = dict(params)
+        trial_rows.append(
+            {
+                "station": station,
+                "horizon": horizon,
+                "horizon_hours": horizon_to_hours(horizon),
+                "split_id": split_id,
+                "train_days": train_days,
+                "model": model_name,
+                "study_name": f"{station}_{safe_name(horizon)}_{model_name}_{target_column}_{split_id}_{method}",
+                "trial_number": trial_number,
+                "value": float(value),
+                "state": "COMPLETE",
+                "params": json.dumps(params, sort_keys=True),
+            }
+        )
+
+    if not best_params:
+        return pd.Series(index=test.index, dtype=float), {}, trial_rows, [], [], int(valid_train.sum())
+
+    y_pred, final_model, train_label_rows = fit_final_tuned_model(
+        train,
+        validation,
+        test,
+        target_column=target_column,
+        selected_features=selected_features,
+        model_name=model_name,
+        config=config,
+        params=best_params,
+    )
+    model_key = f"{station}_{safe_name(horizon)}_{model_name}_{split_id}_{method}"
+    if automl.get("save_models", False):
+        model_dir = output_dir / "models"
+        model_dir.mkdir(parents=True, exist_ok=True)
+        joblib.dump(final_model, model_dir / f"{model_key}.joblib")
+    info = {
+        "best_params": json.dumps(best_params, sort_keys=True),
+        "best_val_score": float(best_value),
+        "study_name": model_key,
+        "search_method": method,
+    }
+    best_param_rows = [
+        {
+            "station": station,
+            "horizon": horizon,
+            "horizon_hours": horizon_to_hours(horizon),
+            "split_id": split_id,
+            "train_days": train_days,
+            "model": model_name,
+            "study_name": model_key,
+            "search_method": method,
+            "best_value": float(best_value),
+            "best_params": json.dumps(best_params, sort_keys=True),
+            "train_final_rows": train_label_rows,
+        }
+    ]
+    importance_rows = feature_importance_rows(
+        final_model,
+        selected_features,
+        station=station,
+        horizon=horizon,
+        split_id=split_id,
+        train_days=train_days,
+        model_name=f"{method}_{model_name}",
+    )
+    if valid_test.sum() < int(config["minimum_eval_rows"]):
+        return pd.Series(index=test.index, dtype=float), info, trial_rows, best_param_rows, importance_rows, train_label_rows
+    return y_pred, info, trial_rows, best_param_rows, importance_rows, train_label_rows
 
 
 def run_optuna_model(
@@ -362,9 +656,28 @@ def run_optuna_model(
     config: dict[str, Any],
     station: str,
     horizon: str,
+    split_id: str,
+    train_days: int | None,
     output_dir: Path,
-) -> tuple[pd.Series, dict[str, Any], list[dict[str, Any]], int]:
+) -> tuple[pd.Series, dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int]:
     automl = config.get("automl", {})
+    method = automl.get("method", "optuna_tpe_pruning")
+    if method in {"default", "grid_search", "random_search"}:
+        return run_candidate_search_model(
+            train,
+            validation,
+            test,
+            target_column=target_column,
+            selected_features=selected_features,
+            model_name=model_name,
+            config=config,
+            station=station,
+            horizon=horizon,
+            split_id=split_id,
+            train_days=train_days,
+            output_dir=output_dir,
+            method=method,
+        )
     metric = automl.get("metric", "RMSE")
     random_state = int(automl.get("random_state", 42))
     direction = objective_direction(metric)
@@ -376,7 +689,7 @@ def run_optuna_model(
     valid_val = y_val.notna()
     valid_test = y_test.notna()
     if valid_train.sum() < int(config["minimum_train_rows"]) or valid_val.sum() < int(config["minimum_eval_rows"]):
-        return pd.Series(index=test.index, dtype=float), {}, [], int(valid_train.sum())
+        return pd.Series(index=test.index, dtype=float), {}, [], [], [], int(valid_train.sum())
 
     x_train, x_val, x_test = impute_frames(train.loc[valid_train], test, selected_features, validation.loc[valid_val])
     assert x_val is not None
@@ -384,9 +697,9 @@ def run_optuna_model(
     y_val_eval = y_val.loc[valid_val]
 
     sampler = optuna.samplers.TPESampler(seed=random_state)
-    pruner = optuna.pruners.MedianPruner() if automl.get("method") == "optuna_tpe_pruning" else optuna.pruners.NopPruner()
+    pruner = optuna.pruners.MedianPruner() if method == "optuna_tpe_pruning" else optuna.pruners.NopPruner()
     storage = automl.get("storage")
-    study_name = f"{station}_{horizon}_{model_name}_{target_column}"
+    study_name = f"{station}_{safe_name(horizon)}_{model_name}_{target_column}_{split_id}"
     study = optuna.create_study(
         direction=direction,
         sampler=sampler,
@@ -397,7 +710,7 @@ def run_optuna_model(
     )
 
     def objective(trial: optuna.Trial) -> float:
-        params = sample_optuna_params(model_name, trial)
+        params = sample_optuna_params(model_name, trial, config)
         model = make_estimator(model_name, config, params=params)
         model.fit(x_train, y_train_fit)
         pred = pd.Series(model.predict(x_val), index=y_val_eval.index)
@@ -428,7 +741,7 @@ def run_optuna_model(
     if automl.get("save_models", False):
         model_dir = output_dir / "models"
         model_dir.mkdir(parents=True, exist_ok=True)
-        joblib.dump(final_model, model_dir / f"{station}_{safe_name(horizon)}_{model_name}.joblib")
+        joblib.dump(final_model, model_dir / f"{station}_{safe_name(horizon)}_{model_name}_{split_id}.joblib")
 
     trials = []
     for trial in study.trials:
@@ -436,17 +749,44 @@ def run_optuna_model(
             {
                 "station": station,
                 "horizon": horizon,
+                "horizon_hours": horizon_to_hours(horizon),
+                "split_id": split_id,
+                "train_days": train_days,
                 "model": model_name,
+                "study_name": study_name,
                 "trial_number": trial.number,
                 "value": trial.value,
                 "state": str(trial.state),
                 "params": json.dumps(trial.params, sort_keys=True),
             }
         )
-    info = {"best_params": json.dumps(best_params, sort_keys=True), "best_val_score": best_value}
+    info = {"best_params": json.dumps(best_params, sort_keys=True), "best_val_score": best_value, "study_name": study_name}
+    best_param_rows = [
+        {
+            "station": station,
+            "horizon": horizon,
+            "horizon_hours": horizon_to_hours(horizon),
+            "split_id": split_id,
+            "train_days": train_days,
+            "model": model_name,
+            "study_name": study_name,
+            "best_value": best_value,
+            "best_params": json.dumps(best_params, sort_keys=True),
+            "train_final_rows": train_label_rows,
+        }
+    ]
+    importance_rows = feature_importance_rows(
+        final_model,
+        selected_features,
+        station=station,
+        horizon=horizon,
+        split_id=split_id,
+        train_days=train_days,
+        model_name=f"Optuna_{model_name}",
+    )
     if valid_test.sum() < int(config["minimum_eval_rows"]):
-        return pd.Series(index=test.index, dtype=float), info, trials, train_label_rows
-    return y_pred, info, trials, train_label_rows
+        return pd.Series(index=test.index, dtype=float), info, trials, best_param_rows, importance_rows, train_label_rows
+    return y_pred, info, trials, best_param_rows, importance_rows, train_label_rows
 
 
 def append_metric_and_predictions(
@@ -512,7 +852,7 @@ def run_station(
     horizons: list[str],
     output_dir: Path,
     run_automl: bool,
-) -> tuple[list[dict[str, Any]], list[pd.DataFrame], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[pd.DataFrame], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     path = Path(config["feature_dir"]) / "stations" / f"{station}_features.csv"
     if not path.exists():
         raise FileNotFoundError(path)
@@ -520,15 +860,25 @@ def run_station(
     frame["time_utc"] = pd.to_datetime(frame["time_utc"], utc=True, errors="coerce")
     frame = frame.dropna(subset=["time_utc"]).sort_values("time_utc").reset_index(drop=True)
     feature_pool = numeric_feature_pool(frame, config["target"])
+    context = station_context(station, frame)
+    station_dir = output_dir / "stations" / station
+    station_dir.mkdir(parents=True, exist_ok=True)
 
     metric_rows: list[dict[str, Any]] = []
     prediction_frames: list[pd.DataFrame] = []
     trial_rows: list[dict[str, Any]] = []
+    best_param_rows: list[dict[str, Any]] = []
+    importance_rows: list[dict[str, Any]] = []
     for horizon in horizons:
         target_column = f"{config['target']}_target_{safe_name(horizon)}"
         if target_column not in frame.columns:
             raise KeyError(f"Missing target column {target_column!r} in {path}.")
         for iteration in split_iterations(config):
+            start_metrics = len(metric_rows)
+            start_predictions = len(prediction_frames)
+            start_trials = len(trial_rows)
+            start_best_params = len(best_param_rows)
+            start_importance = len(importance_rows)
             train, validation, test, bounds = split_frames(
                 frame,
                 config=config,
@@ -550,7 +900,7 @@ def run_station(
                     y_pred = make_baseline_predictions(test, model_name, config["target"], horizon)
                     extra = {"train_label_rows": int(pd.to_numeric(train[target_column], errors="coerce").notna().sum())}
                 elif model_name in ML_MODELS:
-                    y_pred, train_label_rows = fit_predict_ml(
+                    y_pred, train_label_rows, estimator = fit_predict_ml(
                         train,
                         test,
                         target_column=target_column,
@@ -559,6 +909,18 @@ def run_station(
                         config=config,
                     )
                     extra = {"train_label_rows": train_label_rows}
+                    if estimator is not None:
+                        importance_rows.extend(
+                            feature_importance_rows(
+                                estimator,
+                                selected_features,
+                                station=station,
+                                horizon=horizon,
+                                split_id=iteration["split_id"],
+                                train_days=iteration["train_days"],
+                                model_name=model_name,
+                            )
+                        )
                 else:
                     raise ValueError(f"Unsupported model in config: {model_name}")
                 append_metric_and_predictions(
@@ -584,7 +946,7 @@ def run_station(
                 for model_name in automl.get("models", []):
                     if model_name not in OPTUNA_MODELS:
                         raise ValueError(f"Unsupported Optuna model in config: {model_name}")
-                    y_pred, info, trials, train_label_rows = run_optuna_model(
+                    y_pred, info, trials, best_params, optuna_importance, train_label_rows = run_optuna_model(
                         train,
                         validation,
                         test,
@@ -594,9 +956,13 @@ def run_station(
                         config=config,
                         station=station,
                         horizon=horizon,
+                        split_id=iteration["split_id"],
+                        train_days=iteration["train_days"],
                         output_dir=output_dir,
                     )
                     trial_rows.extend(trials)
+                    best_param_rows.extend(best_params)
+                    importance_rows.extend(optuna_importance)
                     append_metric_and_predictions(
                         metric_rows=metric_rows,
                         prediction_frames=prediction_frames,
@@ -614,7 +980,122 @@ def run_station(
                         y_pred=y_pred,
                         extra={"train_label_rows": train_label_rows, **info},
                     )
-    return metric_rows, prediction_frames, trial_rows
+            new_metrics = enrich_rows(metric_rows[start_metrics:], context)
+            new_predictions = prediction_frames[start_predictions:]
+            new_trials = enrich_rows(trial_rows[start_trials:], context)
+            new_best_params = enrich_rows(best_param_rows[start_best_params:], context)
+            new_importance = enrich_rows(importance_rows[start_importance:], context)
+            write_partial_station_outputs(
+                station_dir,
+                new_metrics,
+                new_predictions,
+                new_trials,
+                new_best_params,
+                new_importance,
+                station=station,
+                horizon=horizon,
+                split_id=iteration["split_id"],
+            )
+    metric_rows = enrich_rows(metric_rows, context)
+    trial_rows = enrich_rows(trial_rows, context)
+    best_param_rows = enrich_rows(best_param_rows, context)
+    importance_rows = enrich_rows(importance_rows, context)
+    return metric_rows, prediction_frames, trial_rows, best_param_rows, importance_rows
+
+
+def append_csv(rows: list[dict[str, Any]], path: Path) -> None:
+    if not rows:
+        return
+    df = pd.DataFrame(rows)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, mode="a", header=not path.exists(), index=False)
+
+
+def append_prediction_frames(frames: list[pd.DataFrame], path: Path) -> None:
+    if not frames:
+        return
+    df = pd.concat(frames, ignore_index=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, mode="a", header=not path.exists(), index=False)
+
+
+def write_partial_station_outputs(
+    station_dir: Path,
+    metrics: list[dict[str, Any]],
+    predictions: list[pd.DataFrame],
+    trials: list[dict[str, Any]],
+    best_params: list[dict[str, Any]],
+    feature_importance: list[dict[str, Any]],
+    *,
+    station: str,
+    horizon: str,
+    split_id: str,
+) -> None:
+    append_csv(metrics, station_dir / "partial_metrics.csv")
+    append_prediction_frames(predictions, station_dir / "partial_predictions.csv")
+    append_csv(trials, station_dir / "partial_optuna_trials.csv")
+    append_csv(best_params, station_dir / "partial_best_params.csv")
+    append_csv(feature_importance, station_dir / "partial_feature_importance.csv")
+    progress = {
+        "station": station,
+        "horizon": horizon,
+        "split_id": split_id,
+        "metrics_rows": sum(1 for _ in open(station_dir / "partial_metrics.csv", encoding="utf-8")) - 1
+        if (station_dir / "partial_metrics.csv").exists()
+        else 0,
+        "updated_utc": pd.Timestamp.utcnow().isoformat(),
+    }
+    (station_dir / "partial_progress.json").write_text(json.dumps(progress, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def write_table(df: pd.DataFrame, csv_path: Path, parquet_path: Path | None = None) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(csv_path, index=False)
+    if parquet_path is not None and not df.empty:
+        parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(parquet_path, index=False)
+
+
+def write_station_outputs(
+    output_dir: Path,
+    config: dict[str, Any],
+    station: str,
+    metrics: list[dict[str, Any]],
+    predictions: pd.DataFrame,
+    trials: list[dict[str, Any]],
+    best_params: list[dict[str, Any]],
+    feature_importance: list[dict[str, Any]],
+) -> dict[str, int]:
+    station_dir = output_dir / "stations" / station
+    station_dir.mkdir(parents=True, exist_ok=True)
+    metrics_df = pd.DataFrame(metrics)
+    trials_df = pd.DataFrame(trials)
+    best_params_df = pd.DataFrame(best_params)
+    importance_df = pd.DataFrame(feature_importance)
+
+    write_table(metrics_df, station_dir / "metrics.csv", station_dir / "metrics.parquet")
+    write_table(predictions, station_dir / "predictions.csv", station_dir / "predictions.parquet")
+    write_table(trials_df, station_dir / "optuna_trials.csv", station_dir / "optuna_trials.parquet")
+    write_table(best_params_df, station_dir / "best_params.csv", station_dir / "best_params.parquet")
+    write_table(importance_df, station_dir / "feature_importance.csv", station_dir / "feature_importance.parquet")
+
+    station_summary = {
+        "station": station,
+        "metrics_rows": int(len(metrics_df)),
+        "prediction_rows": int(len(predictions)),
+        "trial_rows": int(len(trials_df)),
+        "best_param_rows": int(len(best_params_df)),
+        "feature_importance_rows": int(len(importance_df)),
+        "files": {
+            "metrics": "metrics.csv",
+            "predictions": "predictions.parquet",
+            "optuna_trials": "optuna_trials.parquet",
+            "best_params": "best_params.parquet",
+            "feature_importance": "feature_importance.parquet",
+        },
+    }
+    (station_dir / "run_summary.json").write_text(json.dumps(station_summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {key: int(value) for key, value in station_summary.items() if key.endswith("_rows")}
 
 
 def write_outputs(
@@ -624,14 +1105,21 @@ def write_outputs(
     horizons: list[str],
     metrics: list[dict[str, Any]],
     trials: list[dict[str, Any]],
+    best_params: list[dict[str, Any]],
+    feature_importance: list[dict[str, Any]],
     prediction_rows: int,
+    station_summaries: list[dict[str, Any]],
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_df = pd.DataFrame(metrics)
     trials_df = pd.DataFrame(trials)
+    best_params_df = pd.DataFrame(best_params)
+    importance_df = pd.DataFrame(feature_importance)
 
     metrics_df.to_csv(output_dir / "metrics.csv", index=False)
     trials_df.to_csv(output_dir / "optuna_trials.csv", index=False)
+    best_params_df.to_csv(output_dir / "best_params.csv", index=False)
+    importance_df.to_csv(output_dir / "feature_importance.csv", index=False)
     if not metrics_df.empty:
         summary = (
             metrics_df.groupby(["station", "horizon", "model"], dropna=False)[["n", "mae", "rmse", "r2", "corr", "bias"]]
@@ -644,8 +1132,40 @@ def write_outputs(
 
     if config.get("automl", {}).get("export_trials_parquet", False) and not trials_df.empty:
         trials_df.to_parquet(output_dir / "optuna_trials.parquet", index=False)
+    if not best_params_df.empty:
+        best_params_df.to_parquet(output_dir / "best_params.parquet", index=False)
+    if not importance_df.empty:
+        importance_df.to_parquet(output_dir / "feature_importance.parquet", index=False)
     if not metrics_df.empty:
         metrics_df.to_parquet(output_dir / "metrics.parquet", index=False)
+    pd.DataFrame(station_summaries).to_csv(output_dir / "station_run_summary.csv", index=False)
+    registry_columns = [
+        "station",
+        "latitude_zone",
+        "horizon",
+        "split_id",
+        "train_days",
+        "model",
+        "train_start",
+        "safe_train_end",
+        "validation_start",
+        "validation_end",
+        "test_start",
+        "test_end",
+        "n",
+        "mae",
+        "rmse",
+        "r2",
+        "corr",
+        "bias",
+        "best_val_score",
+        "study_name",
+    ]
+    registry_columns = [column for column in registry_columns if column in metrics_df.columns]
+    model_registry = metrics_df[registry_columns].copy() if registry_columns else pd.DataFrame()
+    model_registry.to_csv(output_dir / "model_registry.csv", index=False)
+    if not model_registry.empty:
+        model_registry.to_parquet(output_dir / "model_registry.parquet", index=False)
 
     run_manifest = {
         "config": config,
@@ -654,9 +1174,51 @@ def write_outputs(
         "metrics_rows": int(len(metrics_df)),
         "prediction_rows": int(prediction_rows),
         "trial_rows": int(len(trials_df)),
-        "prediction_layout": "artifacts/<experiment>/predictions/<station>_predictions.{csv,parquet}",
+        "best_param_rows": int(len(best_params_df)),
+        "feature_importance_rows": int(len(importance_df)),
+        "station_summaries": station_summaries,
+        "result_layout": {
+            "global": [
+                "metrics.csv",
+                "metrics_summary.csv",
+                "optuna_trials.csv",
+                "best_params.csv",
+                "feature_importance.csv",
+                "model_registry.csv",
+                "experiment_report.md",
+                "run_manifest.json",
+            ],
+            "per_station": "artifacts/<experiment>/stations/<station>/{metrics,predictions,optuna_trials,best_params,feature_importance}.{csv,parquet}",
+            "models": "artifacts/<experiment>/models/<station>_<horizon>_<model>_<split_id>.joblib",
+            "optuna_storage": config.get("automl", {}).get("storage"),
+        },
     }
     (output_dir / "run_manifest.json").write_text(json.dumps(run_manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    report_lines = [
+        f"# Experiment {config.get('experiment_id', '')}",
+        "",
+        f"- dataset_step: {config.get('dataset_step')}",
+        f"- evaluation_mode: {config.get('evaluation_mode')}",
+        f"- stations: {len(stations)}",
+        f"- horizons: {', '.join(horizons)}",
+        f"- metrics_rows: {len(metrics_df)}",
+        f"- prediction_rows: {prediction_rows}",
+        f"- search_trial_rows: {len(trials_df)}",
+        f"- best_param_rows: {len(best_params_df)}",
+        f"- feature_importance_rows: {len(importance_df)}",
+        "",
+        "## Output Tables",
+        "",
+        "- metrics.csv / metrics.parquet",
+        "- metrics_summary.csv",
+        "- station_run_summary.csv",
+        "- model_registry.csv / model_registry.parquet",
+        "- optuna_trials.csv / optuna_trials.parquet",
+        "- best_params.csv / best_params.parquet",
+        "- feature_importance.csv / feature_importance.parquet",
+        "- stations/<station>/...",
+    ]
+    (output_dir / "experiment_report.md").write_text("\n".join(report_lines), encoding="utf-8")
 
 
 def dry_run(config: dict[str, Any], stations: list[str], horizons: list[str], run_automl: bool) -> None:
@@ -688,6 +1250,22 @@ def dry_run(config: dict[str, Any], stations: list[str], horizons: list[str], ru
         for key, value in bounds.items():
             print(f"  {key}: {value}")
         print(f"  rows: train={len(train)} validation={len(validation)} test={len(test)}")
+    elif config.get("evaluation_mode") == "walk_forward_daily" and stations and horizons:
+        sample_path = Path(config["feature_dir"]) / "stations" / f"{stations[0]}_features.csv"
+        sample = pd.read_csv(sample_path, usecols=["time_utc", f"{config['target']}_target_{safe_name(horizons[-1])}"])
+        sample["time_utc"] = pd.to_datetime(sample["time_utc"], utc=True, errors="coerce")
+        first_iteration = iterations[0]
+        train, validation, test, bounds = split_frames(
+            sample,
+            config=config,
+            horizon=horizons[-1],
+            current_day=first_iteration["test_day"],
+            train_days=first_iteration["train_days"],
+        )
+        print("sample_first_walk_forward_split_for_largest_horizon:")
+        for key, value in bounds.items():
+            print(f"  {key}: {value}")
+        print(f"  rows: train={len(train)} validation={len(validation)} test={len(test)}")
 
 
 def main() -> None:
@@ -704,22 +1282,37 @@ def main() -> None:
 
     all_metrics: list[dict[str, Any]] = []
     all_trials: list[dict[str, Any]] = []
+    all_best_params: list[dict[str, Any]] = []
+    all_importance: list[dict[str, Any]] = []
+    station_summaries: list[dict[str, Any]] = []
     prediction_rows = 0
-    prediction_dir = output_dir / "predictions"
-    prediction_dir.mkdir(parents=True, exist_ok=True)
     for station in stations:
-        metrics, predictions, trials = run_station(config, station, horizons, output_dir, run_automl)
+        metrics, predictions, trials, best_params, importance = run_station(config, station, horizons, output_dir, run_automl)
         all_metrics.extend(metrics)
         all_trials.extend(trials)
+        all_best_params.extend(best_params)
+        all_importance.extend(importance)
         station_predictions = pd.concat(predictions, ignore_index=True) if predictions else pd.DataFrame()
         prediction_rows += int(len(station_predictions))
-        if not station_predictions.empty:
-            station_predictions.to_csv(prediction_dir / f"{station}_predictions.csv", index=False)
-            if config.get("automl", {}).get("export_predictions_parquet", True):
-                station_predictions.to_parquet(prediction_dir / f"{station}_predictions.parquet", index=False)
-        print(f"{station}: metrics={len(metrics)} prediction_blocks={len(predictions)} trials={len(trials)}")
+        summary_counts = write_station_outputs(output_dir, config, station, metrics, station_predictions, trials, best_params, importance)
+        station_summaries.append({"station": station, **summary_counts})
+        print(
+            f"{station}: metrics={len(metrics)} prediction_blocks={len(predictions)} "
+            f"trials={len(trials)} best_params={len(best_params)} feature_importance={len(importance)}"
+        )
 
-    write_outputs(output_dir, config, stations, horizons, all_metrics, all_trials, prediction_rows)
+    write_outputs(
+        output_dir,
+        config,
+        stations,
+        horizons,
+        all_metrics,
+        all_trials,
+        all_best_params,
+        all_importance,
+        prediction_rows,
+        station_summaries,
+    )
     print(f"wrote {output_dir}")
 
 

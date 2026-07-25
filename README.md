@@ -66,6 +66,74 @@ python .\collect_hf_data.py --config .\config.toml
 
 Это означает весь 2024 год и весь 2025 год.
 
+## ML/AutoML запуск по станциям
+
+Для основного эксперимента используется 15-минутная сетка, feature dataset
+`features_2024_2025_exploration_v0_1_15min` и конфиг:
+
+```text
+configs/experiments/baseline_v0.1.json
+```
+
+Конфиг задаёт walk-forward схему по дням 2025 года, окна обучения `7`, `21` и
+`28` дней, горизонты `15min`, `1h`, `3h`, `6h`, `24h`, baseline-модели,
+`LinearRegression`, `ElasticNet`, `RandomForest`, `XGBoost`, `CatBoost` и
+AutoML-подбор гиперпараметров.
+
+Полный запуск лучше выполнять поэтапно, станция за станцией:
+
+```powershell
+.\.venv\Scripts\python.exe .\run_station_batch.py `
+  --config .\configs\experiments\baseline_v0.1.json
+```
+
+Проверить первые станции без обучения:
+
+```powershell
+.\.venv\Scripts\python.exe .\run_station_batch.py `
+  --config .\configs\experiments\baseline_v0.1.json `
+  --max-stations 3 `
+  --dry-run
+```
+
+Запустить одну станцию:
+
+```powershell
+.\.venv\Scripts\python.exe .\run_station_batch.py `
+  --config .\configs\experiments\baseline_v0.1.json `
+  --station TR169
+```
+
+Результаты каждой станции сохраняются отдельно:
+
+```text
+artifacts/baseline_v0.1/stations/<station>/
+  metrics.csv
+  metrics.parquet
+  predictions.csv
+  predictions.parquet
+  optuna_trials.csv
+  optuna_trials.parquet
+  best_params.csv
+  best_params.parquet
+  feature_importance.csv
+  feature_importance.parquet
+  run_summary.json
+```
+
+Во время длинного запуска промежуточный прогресс можно смотреть через:
+
+```powershell
+.\.venv\Scripts\python.exe .\watch_run_progress.py `
+  --run-dir .\artifacts\baseline_v0.1
+```
+
+Быстрый просмотр готовых результатов и промежуточных таблиц выполняется в:
+
+```text
+notebooks/ml_results_review.ipynb
+```
+
 ## Запуск за свой период
 
 Период можно переопределить через `--start` и `--end`.

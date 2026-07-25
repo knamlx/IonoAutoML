@@ -223,6 +223,7 @@ data_2024_2025*/
 cleaned_2024_2025/
 datasets/
 artifacts/
+catboost_info/
 normalized_2024_2025*/
 quality_scan*/
 figures/
