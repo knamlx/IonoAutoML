@@ -471,34 +471,38 @@ def parameter_grid_from_config(model_name: str, config: dict[str, Any]) -> dict[
     return {name: grid_values_from_space(spec) for name, spec in spaces[model_name].items()}
 
 
-def fixed_model_params(model_name: str) -> dict[str, Any]:
+def fixed_model_params(model_name: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
+    config = config or {}
+    runtime = config.get("runtime", {})
+    n_jobs = int(runtime.get("model_n_jobs", 1))
+    thread_count = int(runtime.get("catboost_thread_count", n_jobs))
     if model_name == "ElasticNet":
         return {"max_iter": 10000, "random_state": 42}
     if model_name == "RandomForest":
-        return {"n_jobs": 1, "random_state": 42}
+        return {"n_jobs": n_jobs, "random_state": 42}
     if model_name == "XGBoost":
-        return {"objective": "reg:squarederror", "n_jobs": 1, "verbosity": 0, "random_state": 42}
+        return {"objective": "reg:squarederror", "n_jobs": n_jobs, "verbosity": 0, "random_state": 42}
     if model_name == "CatBoost":
-        return {"random_seed": 42, "thread_count": 1, "verbose": False}
+        return {"random_seed": 42, "thread_count": thread_count, "verbose": False}
     return {}
 
 
 def sample_optuna_params(model_name: str, trial: optuna.Trial, config: dict[str, Any]) -> dict[str, Any]:
     configured = configured_optuna_params(model_name, trial, config)
     if model_name in OPTUNA_MODELS:
-        return configured | fixed_model_params(model_name)
+        return configured | fixed_model_params(model_name, config)
     raise ValueError(f"Unsupported Optuna model: {model_name}")
 
 
 def candidate_search_params(model_name: str, config: dict[str, Any], method: str, random_state: int) -> list[dict[str, Any]]:
     grid = parameter_grid_from_config(model_name, config)
     if not grid:
-        return [fixed_model_params(model_name)]
+        return [fixed_model_params(model_name, config)]
     if method == "grid_search":
-        return [dict(params) | fixed_model_params(model_name) for params in ParameterGrid(grid)]
+        return [dict(params) | fixed_model_params(model_name, config) for params in ParameterGrid(grid)]
     if method == "random_search":
         n_iter = int(config.get("automl", {}).get("n_trials", 25))
-        return [dict(params) | fixed_model_params(model_name) for params in ParameterSampler(grid, n_iter=n_iter, random_state=random_state)]
+        return [dict(params) | fixed_model_params(model_name, config) for params in ParameterSampler(grid, n_iter=n_iter, random_state=random_state)]
     if method == "default":
         return [default_model_params(model_name, config)]
     raise ValueError(f"Unsupported search method: {method!r}")
@@ -699,6 +703,10 @@ def run_optuna_model(
     sampler = optuna.samplers.TPESampler(seed=random_state)
     pruner = optuna.pruners.MedianPruner() if method == "optuna_tpe_pruning" else optuna.pruners.NopPruner()
     storage = automl.get("storage")
+    if isinstance(storage, str):
+        storage = storage.format(station=station, horizon=safe_name(horizon), split_id=split_id, model=model_name)
+        if storage.startswith("sqlite:///"):
+            Path(storage.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     study_name = f"{station}_{safe_name(horizon)}_{model_name}_{target_column}_{split_id}"
     study = optuna.create_study(
         direction=direction,

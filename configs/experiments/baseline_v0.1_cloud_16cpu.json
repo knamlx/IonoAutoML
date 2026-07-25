@@ -1,0 +1,237 @@
+{
+  "experiment_id": "baseline_v0.1_cloud_16cpu",
+  "feature_dir": "features_2024_2025_exploration_v0_1_15min",
+  "output_dir": "artifacts/baseline_v0.1_cloud_16cpu",
+  "dataset_step": "15min",
+  "evaluation_mode": "walk_forward_daily",
+  "stations": "all",
+  "target": "foF2",
+  "horizons": [
+    "15min",
+    "1h",
+    "3h",
+    "6h",
+    "24h"
+  ],
+  "ml_date_start": "2025-01-01T00:00:00Z",
+  "ml_date_end": "2026-01-01T00:00:00Z",
+  "test_start": "2025-01-01T00:00:00Z",
+  "test_end": "2026-01-01T00:00:00Z",
+  "window_list": [
+    7,
+    21,
+    28
+  ],
+  "minimum_train_rows": 48,
+  "minimum_eval_rows": 2,
+  "minimum_feature_coverage": 0.3,
+  "models": [
+    "persistence_state",
+    "persistence_horizon_lag",
+    "seasonal_24h_lag",
+    "LinearRegression",
+    "ElasticNet",
+    "RandomForest",
+    "XGBoost",
+    "CatBoost"
+  ],
+  "automl": {
+    "enabled": true,
+    "method": "optuna_tpe_pruning",
+    "models": [
+      "ElasticNet",
+      "RandomForest",
+      "XGBoost",
+      "CatBoost"
+    ],
+    "metric": "RMSE",
+    "n_trials": 10,
+    "val_days": 1,
+    "test_h": 24,
+    "random_state": 42,
+    "storage": "sqlite:///artifacts/baseline_v0.1_cloud_16cpu/optimization/{station}.db",
+    "train_final_on_train_validation": true,
+    "export_trials_parquet": true,
+    "export_predictions_parquet": true,
+    "save_models": true
+  },
+  "hyperparameter_spaces": {
+    "ElasticNet": {
+      "alpha": {
+        "type": "float",
+        "low": 0.0001,
+        "high": 100.0,
+        "log": true
+      },
+      "l1_ratio": {
+        "type": "float",
+        "low": 0.01,
+        "high": 0.99
+      }
+    },
+    "RandomForest": {
+      "n_estimators": {
+        "type": "int",
+        "low": 200,
+        "high": 1200,
+        "step": 100
+      },
+      "max_depth": {
+        "type": "int",
+        "low": 4,
+        "high": 20
+      },
+      "min_samples_split": {
+        "type": "int",
+        "low": 2,
+        "high": 12
+      },
+      "min_samples_leaf": {
+        "type": "int",
+        "low": 1,
+        "high": 10
+      },
+      "max_features": {
+        "type": "float",
+        "low": 0.3,
+        "high": 1.0
+      },
+      "bootstrap": {
+        "type": "categorical",
+        "choices": [
+          true,
+          false
+        ]
+      }
+    },
+    "XGBoost": {
+      "n_estimators": {
+        "type": "int",
+        "low": 200,
+        "high": 1200,
+        "step": 100
+      },
+      "max_depth": {
+        "type": "int",
+        "low": 3,
+        "high": 8
+      },
+      "learning_rate": {
+        "type": "float",
+        "low": 0.01,
+        "high": 0.15,
+        "log": true
+      },
+      "subsample": {
+        "type": "float",
+        "low": 0.5,
+        "high": 1.0
+      },
+      "colsample_bytree": {
+        "type": "float",
+        "low": 0.4,
+        "high": 1.0
+      },
+      "min_child_weight": {
+        "type": "int",
+        "low": 1,
+        "high": 15
+      },
+      "reg_alpha": {
+        "type": "float",
+        "low": 0.0,
+        "high": 5.0
+      },
+      "reg_lambda": {
+        "type": "float",
+        "low": 1.0,
+        "high": 20.0
+      }
+    },
+    "CatBoost": {
+      "iterations": {
+        "type": "int",
+        "low": 300,
+        "high": 1200,
+        "step": 100
+      },
+      "depth": {
+        "type": "int",
+        "low": 4,
+        "high": 10
+      },
+      "learning_rate": {
+        "type": "float",
+        "low": 0.01,
+        "high": 0.2,
+        "log": true
+      },
+      "l2_leaf_reg": {
+        "type": "float",
+        "low": 1.0,
+        "high": 20.0,
+        "log": true
+      },
+      "random_strength": {
+        "type": "float",
+        "low": 0.0,
+        "high": 5.0
+      },
+      "bagging_temperature": {
+        "type": "float",
+        "low": 0.0,
+        "high": 5.0
+      },
+      "subsample": {
+        "type": "float",
+        "low": 0.5,
+        "high": 1.0
+      },
+      "loss_function": {
+        "type": "categorical",
+        "choices": [
+          "RMSE"
+        ]
+      }
+    }
+  },
+  "model_params": {
+    "ElasticNet": {
+      "alpha": 1.0,
+      "l1_ratio": 0.5,
+      "max_iter": 5000,
+      "random_state": 42
+    },
+    "RandomForest": {
+      "n_estimators": 300,
+      "max_depth": 8,
+      "min_samples_leaf": 3,
+      "n_jobs": 2,
+      "random_state": 42
+    },
+    "XGBoost": {
+      "objective": "reg:squarederror",
+      "n_estimators": 300,
+      "max_depth": 5,
+      "learning_rate": 0.05,
+      "n_jobs": 2,
+      "verbosity": 0,
+      "random_state": 42
+    },
+    "CatBoost": {
+      "loss_function": "RMSE",
+      "iterations": 500,
+      "depth": 6,
+      "learning_rate": 0.05,
+      "l2_leaf_reg": 3.0,
+      "random_seed": 42,
+      "thread_count": 2,
+      "verbose": false
+    }
+  },
+  "runtime": {
+    "model_n_jobs": 2,
+    "catboost_thread_count": 2,
+    "recommended_parallel_stations": 5
+  }
+}
