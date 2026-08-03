@@ -108,18 +108,22 @@ AutoML-подбор гиперпараметров.
 
 ```text
 artifacts/baseline_v0.1/stations/<station>/
-  metrics.csv
-  metrics.parquet
-  predictions.csv
-  predictions.parquet
-  optuna_trials.csv
-  optuna_trials.parquet
-  best_params.csv
-  best_params.parquet
-  feature_importance.csv
-  feature_importance.parquet
-  run_summary.json
+  <station>_<experiment>_<run_started_utc>_metrics.csv
+  <station>_<experiment>_<run_started_utc>_metrics.parquet
+  <station>_<experiment>_<run_started_utc>_predictions.csv
+  <station>_<experiment>_<run_started_utc>_predictions.parquet
+  <station>_<experiment>_<run_started_utc>_optuna_trials.csv
+  <station>_<experiment>_<run_started_utc>_optuna_trials.parquet
+  <station>_<experiment>_<run_started_utc>_best_params.csv
+  <station>_<experiment>_<run_started_utc>_best_params.parquet
+  <station>_<experiment>_<run_started_utc>_feature_importance.csv
+  <station>_<experiment>_<run_started_utc>_feature_importance.parquet
+  <station>_<experiment>_<run_started_utc>_run_summary.json
 ```
+
+Такая схема нужна для большого прогона: каждая станция лежит в своей папке, а
+имя файла сразу показывает станцию, эксперимент, UTC-время запуска и тип таблицы.
+Повторные запуски не затирают старые результаты.
 
 Во время длинного запуска промежуточный прогресс можно смотреть через:
 
@@ -161,6 +165,15 @@ configs/station_sets/fof2_fast_ml_24h_all_available.txt
 .\.venv\Scripts\python.exe .\run_station_batch.py `
   --config .\configs\experiments\fof2_fast_ml_24h.json `
   --station-file .\configs\station_sets\fof2_fast_ml_24h_all_available.txt
+```
+
+Перед большим запуском удобно проверить план без обучения:
+
+```powershell
+.\.venv\Scripts\python.exe .\run_station_batch.py `
+  --config .\configs\experiments\fof2_fast_ml_24h.json `
+  --station-file .\configs\station_sets\fof2_fast_ml_24h_all_available.txt `
+  --dry-run
 ```
 
 В `run_ml_baselines.py` добавлен вывод текущего прогресса по станции, горизонту,

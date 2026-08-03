@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,16 @@ def load_config(path: Path) -> dict[str, Any]:
 
 def safe_name(value: str) -> str:
     return value.replace(" ", "").replace("/", "_").replace("-", "_")
+
+
+def utc_run_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def output_prefix(config: dict[str, Any], station: str) -> str:
+    experiment_id = safe_name(str(config.get("experiment_id", "experiment")))
+    run_started = safe_name(str(config.get("run_started_utc") or utc_run_stamp()))
+    return f"{safe_name(station)}_{experiment_id}_{run_started}"
 
 
 def horizon_to_hours(horizon: str) -> float:
@@ -1083,33 +1094,45 @@ def write_station_outputs(
 ) -> dict[str, int]:
     station_dir = output_dir / "stations" / station
     station_dir.mkdir(parents=True, exist_ok=True)
+    prefix = output_prefix(config, station)
     metrics_df = pd.DataFrame(metrics)
     trials_df = pd.DataFrame(trials)
     best_params_df = pd.DataFrame(best_params)
     importance_df = pd.DataFrame(feature_importance)
 
-    write_table(metrics_df, station_dir / "metrics.csv", station_dir / "metrics.parquet")
-    write_table(predictions, station_dir / "predictions.csv", station_dir / "predictions.parquet")
-    write_table(trials_df, station_dir / "optuna_trials.csv", station_dir / "optuna_trials.parquet")
-    write_table(best_params_df, station_dir / "best_params.csv", station_dir / "best_params.parquet")
-    write_table(importance_df, station_dir / "feature_importance.csv", station_dir / "feature_importance.parquet")
+    files = {
+        "metrics_csv": f"{prefix}_metrics.csv",
+        "metrics_parquet": f"{prefix}_metrics.parquet",
+        "predictions_csv": f"{prefix}_predictions.csv",
+        "predictions_parquet": f"{prefix}_predictions.parquet",
+        "optuna_trials_csv": f"{prefix}_optuna_trials.csv",
+        "optuna_trials_parquet": f"{prefix}_optuna_trials.parquet",
+        "best_params_csv": f"{prefix}_best_params.csv",
+        "best_params_parquet": f"{prefix}_best_params.parquet",
+        "feature_importance_csv": f"{prefix}_feature_importance.csv",
+        "feature_importance_parquet": f"{prefix}_feature_importance.parquet",
+        "run_summary": f"{prefix}_run_summary.json",
+    }
+
+    write_table(metrics_df, station_dir / files["metrics_csv"], station_dir / files["metrics_parquet"])
+    write_table(predictions, station_dir / files["predictions_csv"], station_dir / files["predictions_parquet"])
+    write_table(trials_df, station_dir / files["optuna_trials_csv"], station_dir / files["optuna_trials_parquet"])
+    write_table(best_params_df, station_dir / files["best_params_csv"], station_dir / files["best_params_parquet"])
+    write_table(importance_df, station_dir / files["feature_importance_csv"], station_dir / files["feature_importance_parquet"])
 
     station_summary = {
         "station": station,
+        "experiment_id": config.get("experiment_id"),
+        "run_started_utc": config.get("run_started_utc"),
+        "file_prefix": prefix,
         "metrics_rows": int(len(metrics_df)),
         "prediction_rows": int(len(predictions)),
         "trial_rows": int(len(trials_df)),
         "best_param_rows": int(len(best_params_df)),
         "feature_importance_rows": int(len(importance_df)),
-        "files": {
-            "metrics": "metrics.csv",
-            "predictions": "predictions.parquet",
-            "optuna_trials": "optuna_trials.parquet",
-            "best_params": "best_params.parquet",
-            "feature_importance": "feature_importance.parquet",
-        },
+        "files": files,
     }
-    (station_dir / "run_summary.json").write_text(json.dumps(station_summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    (station_dir / files["run_summary"]).write_text(json.dumps(station_summary, indent=2, ensure_ascii=False), encoding="utf-8")
     return {key: int(value) for key, value in station_summary.items() if key.endswith("_rows")}
 
 
@@ -1203,7 +1226,7 @@ def write_outputs(
                 "experiment_report.md",
                 "run_manifest.json",
             ],
-            "per_station": "artifacts/<experiment>/stations/<station>/{metrics,predictions,optuna_trials,best_params,feature_importance}.{csv,parquet}",
+            "per_station": "artifacts/<experiment>/stations/<station>/<station>_<experiment>_<run_started_utc>_<table>.{csv,parquet}",
             "models": "artifacts/<experiment>/models/<station>_<horizon>_<model>_<split_id>.joblib",
             "optuna_storage": config.get("automl", {}).get("storage"),
         },
@@ -1231,7 +1254,7 @@ def write_outputs(
         "- optuna_trials.csv / optuna_trials.parquet",
         "- best_params.csv / best_params.parquet",
         "- feature_importance.csv / feature_importance.parquet",
-        "- stations/<station>/...",
+        "- stations/<station>/<station>_<experiment>_<run_started_utc>_<table>.*",
     ]
     (output_dir / "experiment_report.md").write_text("\n".join(report_lines), encoding="utf-8")
 
@@ -1286,6 +1309,7 @@ def dry_run(config: dict[str, Any], stations: list[str], horizons: list[str], ru
 def main() -> None:
     args = parse_args()
     config = load_config(Path(args.config))
+    config.setdefault("run_started_utc", utc_run_stamp())
     stations = resolve_stations(config, args.station)
     horizons = [args.horizon] if args.horizon else list(config["horizons"])
     output_dir = Path(config["output_dir"])

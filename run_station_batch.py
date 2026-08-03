@@ -36,7 +36,8 @@ def read_station_file(path: str | None) -> list[str]:
 
 
 def station_done(output_dir: Path, station: str) -> bool:
-    return (output_dir / "stations" / station / "run_summary.json").exists()
+    station_dir = output_dir / "stations" / station
+    return (station_dir / "run_summary.json").exists() or any(station_dir.glob("*_run_summary.json"))
 
 
 def build_command(args: argparse.Namespace, config_path: Path, station: str) -> list[str]:
