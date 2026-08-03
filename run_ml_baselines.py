@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_config(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def safe_name(value: str) -> str:
@@ -293,14 +293,16 @@ def select_features(train: pd.DataFrame, feature_pool: list[str], min_coverage: 
 def metric_record(y_true: pd.Series, y_pred: pd.Series) -> dict[str, float]:
     valid = pd.DataFrame({"actual": y_true, "predicted": y_pred}).dropna()
     if valid.empty:
-        return {"n": 0, "mae": math.nan, "rmse": math.nan, "r2": math.nan, "corr": math.nan}
+        return {"n": 0, "mae": math.nan, "rmse": math.nan, "r2": math.nan, "corr": math.nan, "bias": math.nan, "mape": math.nan}
     error = valid["predicted"] - valid["actual"]
     mae = float(mean_absolute_error(valid["actual"], valid["predicted"]))
     rmse = float(np.sqrt(mean_squared_error(valid["actual"], valid["predicted"])))
     r2 = float(r2_score(valid["actual"], valid["predicted"])) if len(valid) > 1 else math.nan
     corr = float(valid["actual"].corr(valid["predicted"])) if len(valid) > 1 else math.nan
     bias = float(error.mean())
-    return {"n": int(len(valid)), "mae": mae, "rmse": rmse, "r2": r2, "corr": corr, "bias": bias}
+    nonzero_actual = valid["actual"].abs() > 1e-12
+    mape = float((error.loc[nonzero_actual].abs() / valid.loc[nonzero_actual, "actual"].abs()).mean() * 100) if nonzero_actual.any() else math.nan
+    return {"n": int(len(valid)), "mae": mae, "rmse": rmse, "r2": r2, "corr": corr, "bias": bias, "mape": mape}
 
 
 def make_baseline_predictions(test: pd.DataFrame, model_name: str, target: str, horizon: str) -> pd.Series:
@@ -1069,7 +1071,7 @@ def write_partial_station_outputs(
         "metrics_rows": sum(1 for _ in open(station_dir / "partial_metrics.csv", encoding="utf-8")) - 1
         if (station_dir / "partial_metrics.csv").exists()
         else 0,
-        "updated_utc": pd.Timestamp.utcnow().isoformat(),
+        "updated_utc": pd.Timestamp.now("UTC").isoformat(),
     }
     (station_dir / "partial_progress.json").write_text(json.dumps(progress, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -1080,6 +1082,182 @@ def write_table(df: pd.DataFrame, csv_path: Path, parquet_path: Path | None = No
     if parquet_path is not None and not df.empty:
         parquet_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_parquet(parquet_path, index=False)
+
+
+def season_name(month: int) -> str:
+    if month in {12, 1, 2}:
+        return "Зима"
+    if month in {3, 4, 5}:
+        return "Весна"
+    if month in {6, 7, 8}:
+        return "Лето"
+    return "Осень"
+
+
+def fmt_metric(value: Any, digits: int = 3, suffix: str = "") -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    return f"{float(value):.{digits}f}{suffix}"
+
+
+def model_label(model: str) -> str:
+    labels = {
+        "persistence_state": "Persistence state",
+        "persistence_horizon_lag": "Persistence lag",
+        "seasonal_24h_lag": "Seasonal 24h lag",
+    }
+    return labels.get(model, model)
+
+
+def available_report_metrics(df: pd.DataFrame) -> list[tuple[str, str, int, str]]:
+    candidates = [
+        ("r2", "R2", 3, ""),
+        ("rmse", "RMSE", 2, ""),
+        ("mae", "MAE", 2, ""),
+        ("mape", "MAPE, %", 1, ""),
+    ]
+    return [(column, label, digits, suffix) for column, label, digits, suffix in candidates if column in df.columns]
+
+
+def seasonal_metrics_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
+    if metrics_df.empty or "test_start" not in metrics_df.columns:
+        return pd.DataFrame()
+    df = metrics_df.copy()
+    df["test_start"] = pd.to_datetime(df["test_start"], utc=True, errors="coerce")
+    df = df.dropna(subset=["test_start"])
+    if df.empty:
+        return pd.DataFrame()
+    df["season"] = df["test_start"].dt.month.map(season_name)
+    report_metric_columns = [column for column, _, _, _ in available_report_metrics(df)]
+    if not report_metric_columns:
+        return pd.DataFrame()
+    grouped = (
+        df.groupby(["horizon", "train_days", "season", "model"], dropna=False)[["n", *report_metric_columns]]
+        .mean(numeric_only=True)
+        .reset_index()
+    )
+    order = {"Зима": 0, "Весна": 1, "Лето": 2, "Осень": 3}
+    grouped["season_order"] = grouped["season"].map(order)
+    return grouped.sort_values(["horizon", "train_days", "season_order", "model"]).drop(columns=["season_order"])
+
+
+def markdown_metrics_table(seasonal_df: pd.DataFrame, horizon: str, train_days: Any) -> list[str]:
+    subset = seasonal_df[(seasonal_df["horizon"] == horizon) & (seasonal_df["train_days"] == train_days)]
+    if subset.empty:
+        return []
+    models = list(dict.fromkeys(subset["model"].tolist()))
+    report_metrics = available_report_metrics(subset)
+    lines = [
+        f"### Таблица: метрики прогноза по сезонам, горизонт {horizon}, окно {int(train_days) if pd.notna(train_days) else '-'} дней",
+        "",
+        "| Сезон | " + " | ".join(f"{model_label(model)} {label}" for model in models for _, label, _, _ in report_metrics) + " |",
+        "|---|" + "|".join("---" for _ in range(len(models) * len(report_metrics))) + "|",
+    ]
+    for season in ["Зима", "Весна", "Лето", "Осень"]:
+        season_rows = subset[subset["season"] == season]
+        if season_rows.empty:
+            continue
+        cells = [season]
+        for model in models:
+            row = season_rows[season_rows["model"] == model]
+            if row.empty:
+                cells.extend(["-" for _ in report_metrics])
+                continue
+            record = row.iloc[0]
+            cells.extend([fmt_metric(record[column], digits, suffix) for column, _, digits, suffix in report_metrics])
+        lines.append("| " + " | ".join(cells) + " |")
+    lines.append("")
+    return lines
+
+
+def seasonal_analysis_lines(seasonal_df: pd.DataFrame, horizon: str, train_days: Any) -> list[str]:
+    subset = seasonal_df[(seasonal_df["horizon"] == horizon) & (seasonal_df["train_days"] == train_days)]
+    if subset.empty:
+        return []
+    lines = [f"### Краткий анализ, горизонт {horizon}, окно {int(train_days) if pd.notna(train_days) else '-'} дней", ""]
+    for season in ["Зима", "Весна", "Лето", "Осень"]:
+        season_rows = subset[subset["season"] == season].copy()
+        season_rows = season_rows[season_rows["n"] > 0]
+        if season_rows.empty:
+            lines.append(f"{season}: недостаточно валидных точек для устойчивой оценки.")
+            continue
+        parts = []
+        if "r2" in season_rows.columns:
+            sort_columns = ["r2"] + (["rmse"] if "rmse" in season_rows.columns else [])
+            ascending = [False] + ([True] if "rmse" in season_rows.columns else [])
+            best_r2 = season_rows.sort_values(sort_columns, ascending=ascending).iloc[0]
+            worst_r2 = season_rows.sort_values(sort_columns, ascending=[not value for value in ascending]).iloc[0]
+            parts.append(f"лучшая модель по R2 — {model_label(best_r2['model'])} (R2={fmt_metric(best_r2['r2'])})")
+            parts.append(f"наиболее слабый R2 у {model_label(worst_r2['model'])} ({fmt_metric(worst_r2['r2'])})")
+        if "rmse" in season_rows.columns:
+            sort_columns = ["rmse"] + (["r2"] if "r2" in season_rows.columns else [])
+            ascending = [True] + ([False] if "r2" in season_rows.columns else [])
+            best_rmse = season_rows.sort_values(sort_columns, ascending=ascending).iloc[0]
+            parts.append(f"минимальная RMSE у {model_label(best_rmse['model'])} ({fmt_metric(best_rmse['rmse'], 2)})")
+        if "mape" in season_rows.columns:
+            best_mape = season_rows.sort_values("mape", ascending=True).iloc[0]
+            parts.append(f"минимальная MAPE у {model_label(best_mape['model'])} ({fmt_metric(best_mape['mape'], 1, ' %')})")
+        lines.append(f"{season}: " + "; ".join(parts) + ".")
+    lines.append("")
+    return lines
+
+
+def feature_importance_analysis_lines(importance_df: pd.DataFrame) -> list[str]:
+    if importance_df.empty or not {"model", "feature", "importance_abs"}.issubset(importance_df.columns):
+        return []
+    lines = ["### Важность признаков", ""]
+    grouped = (
+        importance_df.groupby(["model", "feature"], dropna=False)["importance_abs"]
+        .mean()
+        .reset_index()
+        .sort_values(["model", "importance_abs"], ascending=[True, False])
+    )
+    for model in list(dict.fromkeys(grouped["model"].tolist())):
+        top = grouped[grouped["model"] == model].head(5)
+        if top.empty:
+            continue
+        features = ", ".join(f"{row.feature} ({fmt_metric(row.importance_abs, 3)})" for row in top.itertuples())
+        lines.append(f"{model_label(model)}: ведущие признаки по средней абсолютной важности — {features}.")
+    lines.append("")
+    return lines
+
+
+def write_station_markdown_report(
+    station_dir: Path,
+    config: dict[str, Any],
+    station: str,
+    metrics_df: pd.DataFrame,
+    importance_df: pd.DataFrame,
+    report_path: Path,
+) -> None:
+    seasonal_df = seasonal_metrics_table(metrics_df)
+    lines = [
+        f"# Отчет по станции {station}",
+        "",
+        f"- Эксперимент: `{config.get('experiment_id', '')}`",
+        f"- Целевой параметр: `{config.get('target', '')}`",
+        f"- Время запуска UTC: `{config.get('run_started_utc', '')}`",
+        f"- Строк метрик: {len(metrics_df)}",
+        "",
+    ]
+    if seasonal_df.empty:
+        lines.extend(["Недостаточно данных для сезонной агрегации метрик.", ""])
+    else:
+        for horizon in list(dict.fromkeys(seasonal_df["horizon"].tolist())):
+            horizon_df = seasonal_df[seasonal_df["horizon"] == horizon]
+            for train_days in list(dict.fromkeys(horizon_df["train_days"].tolist())):
+                lines.extend(markdown_metrics_table(seasonal_df, horizon, train_days))
+                lines.extend(seasonal_analysis_lines(seasonal_df, horizon, train_days))
+    lines.extend(feature_importance_analysis_lines(importance_df))
+    lines.extend(
+        [
+            "### Примечание",
+            "",
+            "В отчет включаются только метрики, которые есть в таблице результатов. Сезоны определяются по дате начала тестового интервала.",
+            "",
+        ]
+    )
+    report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def write_station_outputs(
@@ -1111,6 +1289,7 @@ def write_station_outputs(
         "best_params_parquet": f"{prefix}_best_params.parquet",
         "feature_importance_csv": f"{prefix}_feature_importance.csv",
         "feature_importance_parquet": f"{prefix}_feature_importance.parquet",
+        "station_report": f"{prefix}_report.md",
         "run_summary": f"{prefix}_run_summary.json",
     }
 
@@ -1119,6 +1298,7 @@ def write_station_outputs(
     write_table(trials_df, station_dir / files["optuna_trials_csv"], station_dir / files["optuna_trials_parquet"])
     write_table(best_params_df, station_dir / files["best_params_csv"], station_dir / files["best_params_parquet"])
     write_table(importance_df, station_dir / files["feature_importance_csv"], station_dir / files["feature_importance_parquet"])
+    write_station_markdown_report(station_dir, config, station, metrics_df, importance_df, station_dir / files["station_report"])
 
     station_summary = {
         "station": station,

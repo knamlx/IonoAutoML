@@ -118,12 +118,18 @@ artifacts/baseline_v0.1/stations/<station>/
   <station>_<experiment>_<run_started_utc>_best_params.parquet
   <station>_<experiment>_<run_started_utc>_feature_importance.csv
   <station>_<experiment>_<run_started_utc>_feature_importance.parquet
+  <station>_<experiment>_<run_started_utc>_report.md
   <station>_<experiment>_<run_started_utc>_run_summary.json
 ```
 
 Такая схема нужна для большого прогона: каждая станция лежит в своей папке, а
 имя файла сразу показывает станцию, эксперимент, UTC-время запуска и тип таблицы.
 Повторные запуски не затирают старые результаты.
+
+Файл `<station>_<experiment>_<run_started_utc>_report.md` автоматически собирает
+сезонную таблицу метрик по моделям и короткий текстовый анализ в стиле статьи:
+лучшие модели по `R2` и `RMSE`, слабые сезоны, `MAPE` и ведущие признаки по
+важности, если модель их экспортирует.
 
 Во время длинного запуска промежуточный прогресс можно смотреть через:
 
