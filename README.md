@@ -134,6 +134,43 @@ artifacts/baseline_v0.1/stations/<station>/
 notebooks/ml_results_review.ipynb
 ```
 
+### Быстрый ML-прогон foF2 на 24 часа
+
+Для ускоренной проверки моделей подготовлен отдельный эксперимент:
+
+```text
+configs/experiments/fof2_fast_ml_24h.json
+```
+
+Он использует тот же 15-минутный feature dataset
+`features_2024_2025_exploration_v0_1_15min`, целевой параметр `foF2`, горизонт
+прогноза `24h`, walk-forward оценку на 2025 год и окна обучения `7`, `21`, `28`
+дней. В быстрый запуск включены `LinearRegression`, `ElasticNet`,
+`RandomForest`, `XGBoost` и `CatBoost`; AutoML/Optuna отключен, чтобы быстрее
+получить сравнимые базовые результаты.
+
+Список доступных станций отсортирован по покрытию целевого признака:
+
+```text
+configs/station_sets/fof2_fast_ml_24h_all_available.txt
+```
+
+Запуск по этому списку:
+
+```powershell
+.\.venv\Scripts\python.exe .\run_station_batch.py `
+  --config .\configs\experiments\fof2_fast_ml_24h.json `
+  --station-file .\configs\station_sets\fof2_fast_ml_24h_all_available.txt
+```
+
+В `run_ml_baselines.py` добавлен вывод текущего прогресса по станции, горизонту,
+окну обучения, split-итерации и модели. Для просмотра уже выполненного анализа
+сохранена копия ноутбука:
+
+```text
+notebooks/ml_results_review.executed.ipynb
+```
+
 ## Запуск за свой период
 
 Период можно переопределить через `--start` и `--end`.

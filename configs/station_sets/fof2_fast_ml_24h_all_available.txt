@@ -1,0 +1,44 @@
+# Stations sorted by foF2_target_24h coverage descending.
+# Use with:
+# .\.venv\Scripts\python.exe .\run_station_batch.py --config .\configs\experiments\fof2_fast_ml_24h.json --station-file .\configs\station_sets\fof2_fast_ml_24h_all_available.txt
+EB040
+PE43K
+DB049
+NI63
+AU930
+BR52P
+CB53N
+PQ052
+EA036
+TV51R
+JR055
+WP937
+ND61R
+WA619
+JJ433
+HO54K
+LL721
+DW41K
+VT139
+SO148
+IC437
+CGK21
+JB57N
+CS31K
+CAJ2M
+MHJ45
+AT138
+FF051
+THJ76
+EA653
+AL945
+AS00Q
+EG931
+BC840
+NI135
+PA836
+GM037
+TR169
+LM42B
+GR13L
+TR170

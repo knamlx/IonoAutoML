@@ -877,11 +877,13 @@ def run_station(
     trial_rows: list[dict[str, Any]] = []
     best_param_rows: list[dict[str, Any]] = []
     importance_rows: list[dict[str, Any]] = []
+    iterations = split_iterations(config)
+    total_splits = len(iterations)
     for horizon in horizons:
         target_column = f"{config['target']}_target_{safe_name(horizon)}"
         if target_column not in frame.columns:
             raise KeyError(f"Missing target column {target_column!r} in {path}.")
-        for iteration in split_iterations(config):
+        for split_index, iteration in enumerate(iterations, start=1):
             start_metrics = len(metric_rows)
             start_predictions = len(prediction_frames)
             start_trials = len(trial_rows)
@@ -904,6 +906,11 @@ def run_station(
                 continue
 
             for model_name in config["models"]:
+                print(
+                    f"[{station}] horizon={horizon} window={iteration['train_days']}d "
+                    f"split={split_index}/{total_splits} model={model_name}",
+                    flush=True,
+                )
                 if model_name in BASELINE_MODELS:
                     y_pred = make_baseline_predictions(test, model_name, config["target"], horizon)
                     extra = {"train_label_rows": int(pd.to_numeric(train[target_column], errors="coerce").notna().sum())}
