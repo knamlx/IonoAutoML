@@ -342,7 +342,7 @@ def impute_frames(
     features: list[str],
     validation: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame | None, pd.DataFrame]:
-    imputer = SimpleImputer(strategy="median")
+    imputer = SimpleImputer(strategy="median", keep_empty_features=True)
     train_imputed = pd.DataFrame(imputer.fit_transform(train[features]), columns=features, index=train.index)
     test_imputed = pd.DataFrame(imputer.transform(test[features]), columns=features, index=test.index)
     val_imputed = None
