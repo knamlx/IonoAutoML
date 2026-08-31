@@ -1,0 +1,6 @@
+model,best_count
+CatBoost,11000
+RandomForest,9597
+XGBoost,6537
+ElasticNet,6107
+LinearRegression,1958

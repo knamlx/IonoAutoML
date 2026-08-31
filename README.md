@@ -1,5 +1,69 @@
 # IonoAutoML
 
+## Current foF2 24h results and next run
+
+The completed fast experiment is stored locally in:
+
+```text
+artifacts/fof2_fast_ml_24h
+```
+
+This artifact directory contains the full per-station outputs and is intentionally ignored by git because the unpacked results are large. A lightweight tracked summary is stored in:
+
+```text
+reports/fof2_fast_ml_24h_results_summary.md
+reports/fof2_fast_ml_24h_model_quality.csv
+reports/fof2_fast_ml_24h_latitude_zone_quality.csv
+reports/fof2_fast_ml_24h_station_model_quality.csv
+reports/fof2_fast_ml_24h_station_metadata.csv
+reports/fof2_fast_ml_24h_station_status.csv
+reports/fof2_fast_ml_24h_best_model_counts.csv
+```
+
+Current completed result status:
+
+- 41 station folders are present in the result artifact.
+- 35 stations have final metrics.
+- `TV51R` has partial metrics and can be completed later.
+- `BC840`, `EA036`, `JB57N`, `TR170`, and `WP937` currently have no usable final metrics in this artifact.
+- The fast run uses `foF2`, a `24h` forecast horizon, 15-minute features, daily walk-forward testing over 2025, and training windows of `7`, `21`, and `28` days.
+- The fast run includes `LinearRegression`, `ElasticNet`, `RandomForest`, `XGBoost`, and `CatBoost`.
+- The fast run used fixed model parameters; Optuna/AutoML was not enabled for those existing results.
+
+The next full experiment configuration is:
+
+```text
+configs/experiments/fof2_fast_ml_24h_automl_shap.json
+```
+
+It writes to a separate output directory so the current results are not overwritten:
+
+```text
+artifacts/fof2_fast_ml_24h_automl_shap
+```
+
+The new run enables:
+
+- Optuna hyperparameter tuning for `ElasticNet`, `RandomForest`, `XGBoost`, and `CatBoost`;
+- saved fitted models;
+- SHAP summaries for all configured models and all training windows;
+- exported metrics, predictions, Optuna trials, best parameters, feature importance, and SHAP summaries.
+
+Run the new experiment on Windows with:
+
+```powershell
+.\run_fof2_automl_shap.ps1
+```
+
+Dry-run check:
+
+```powershell
+.\.venv\Scripts\python.exe .\run_ml_baselines.py `
+  --config .\configs\experiments\fof2_fast_ml_24h_automl_shap.json `
+  --station EB040 `
+  --dry-run
+```
+
 Рабочий проект для подготовки парсера, проверки источников данных и отладки структуры хранения.
 
 Сейчас разработка ведется здесь, в `IonoAutoML`. Подготовленные компоненты, конфигурации, результаты проверок и документация в дальнейшем пойдут в основной проект **ИОНОСКОП**.
