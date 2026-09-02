@@ -228,7 +228,11 @@ normalized_2024_2025*/
 quality_scan*/
 figures/
 features_*/
+!features_2024_2025_exploration_v0_1_15min/
+!features_2024_2025_exploration_v0_1_15min/**
 features_test_*/
+reports/
+output/
 _reference_repos/
 logs_archive/
 _old_data_to_delete/

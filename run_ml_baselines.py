@@ -27,6 +27,7 @@ OPTUNA_MODELS = {"ElasticNet", "RandomForest", "XGBoost", "CatBoost"}
 
 
 def parse_args() -> argparse.Namespace:
+    """Разбирает параметры запуска из командной строки."""
     parser = argparse.ArgumentParser(description="Run leak-aware ML baselines and Optuna models on feature CSVs.")
     parser.add_argument("--config", default="configs/experiments/baseline_v0.1.json")
     parser.add_argument("--station", default=None, help="Optional single station override.")
@@ -37,28 +38,34 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_config(path: Path) -> dict[str, Any]:
+    """Загружает конфигурацию эксперимента или сбора данных из файла."""
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def safe_name(value: str) -> str:
+    """Преобразует строку в безопасное имя для файлов и папок."""
     return value.replace(" ", "").replace("/", "_").replace("-", "_")
 
 
 def utc_run_stamp() -> str:
+    """Создает UTC-метку времени для имени запуска."""
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def output_prefix(config: dict[str, Any], station: str) -> str:
+    """Формирует общий префикс выходных файлов эксперимента."""
     experiment_id = safe_name(str(config.get("experiment_id", "experiment")))
     run_started = safe_name(str(config.get("run_started_utc") or utc_run_stamp()))
     return f"{safe_name(station)}_{experiment_id}_{run_started}"
 
 
 def horizon_to_hours(horizon: str) -> float:
+    """Переводит горизонт прогноза в часы."""
     return pd.Timedelta(horizon) / pd.Timedelta(hours=1)
 
 
 def latitude_zone(latitude: float | int | None) -> str | None:
+    """Определяет широтную зону по широте станции."""
     if latitude is None or not np.isfinite(latitude):
         return None
     lat = float(latitude)
@@ -74,6 +81,7 @@ def latitude_zone(latitude: float | int | None) -> str | None:
 
 
 def station_context(station: str, frame: pd.DataFrame | None = None) -> dict[str, Any]:
+    """Формирует контекст станции для метрик и отчетов."""
     context: dict[str, Any] = {"station": station}
     if frame is not None and not frame.empty:
         for column in ["latitude", "longitude", "geomagnetic_latitude", "geomagnetic_longitude"]:
@@ -95,6 +103,7 @@ def station_context(station: str, frame: pd.DataFrame | None = None) -> dict[str
 
 
 def enrich_rows(rows: list[dict[str, Any]], context: dict[str, Any]) -> list[dict[str, Any]]:
+    """Добавляет к строкам метрик контекст станции и запуска."""
     enriched = []
     for row in rows:
         enriched.append({**{k: v for k, v in context.items() if k != "station"}, **row})
@@ -102,6 +111,7 @@ def enrich_rows(rows: list[dict[str, Any]], context: dict[str, Any]) -> list[dic
 
 
 def as_utc_timestamp(value: str | pd.Timestamp) -> pd.Timestamp:
+    """Преобразует значение времени в UTC timestamp."""
     ts = pd.Timestamp(value)
     if ts.tzinfo is None:
         return ts.tz_localize("UTC")
@@ -109,6 +119,7 @@ def as_utc_timestamp(value: str | pd.Timestamp) -> pd.Timestamp:
 
 
 def resolve_stations(config: dict[str, Any], station_override: str | None = None) -> list[str]:
+    """Определяет список станций для запуска эксперимента."""
     if station_override:
         return [station_override]
     configured = config.get("stations", [])
@@ -119,6 +130,7 @@ def resolve_stations(config: dict[str, Any], station_override: str | None = None
 
 
 def iter_test_days(config: dict[str, Any]) -> list[pd.Timestamp]:
+    """Итерирует тестовые дни внутри заданного периода."""
     start = as_utc_timestamp(config.get("ml_date_start", config["test_start"]))
     end = as_utc_timestamp(config.get("ml_date_end", config["test_end"]))
     if end <= start:
@@ -137,6 +149,7 @@ def split_walk_forward_window(
     validation_days: int | None = None,
     test_h: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, pd.Timestamp]]:
+    """Формирует train/test-разбиение для walk-forward проверки."""
     step = pd.Timedelta(dataset_step)
     forecast_delta = pd.Timedelta(forecast_horizon)
     if forecast_delta < step or forecast_delta % step != pd.Timedelta(0):
@@ -148,6 +161,7 @@ def split_walk_forward_window(
         test_end = test_start + pd.Timedelta(days=1) - step
         train_end = test_start - step
         train_start = train_end - pd.Timedelta(days=train_days) + step
+        # Последние точки train отсекаются: их target на выбранном горизонте уже попал бы в тестовый день.
         safe_train_end = train_end - forecast_delta
         train = frame[(time >= train_start) & (time <= safe_train_end)].copy()
         validation = pd.DataFrame(columns=frame.columns)
@@ -166,10 +180,12 @@ def split_walk_forward_window(
     if test_delta < step:
         raise ValueError(f"test_h must be at least one dataset_step ({step}).")
     test_end = test_start + test_delta - step
+    # Валидация ставится перед тестом с разрывом на горизонт прогноза, чтобы подбор не видел будущие ответы.
     val_end = test_start - forecast_delta - step
     val_start = val_end - pd.Timedelta(days=int(validation_days)) + step
     train_end = val_start - step
     train_start = train_end - pd.Timedelta(days=train_days) + step
+    # safe_train_end защищает и validation: target последних train-строк не должен попадать в validation.
     safe_train_end = train_end - forecast_delta
     train = frame[(time >= train_start) & (time <= safe_train_end)].copy()
     validation = frame[(time >= val_start) & (time <= val_end)].copy()
@@ -196,6 +212,7 @@ def split_fixed_year(
     config: dict[str, Any],
     time_column: str = "time_utc",
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, pd.Timestamp]]:
+    """Формирует train/test-разбиение по фиксированному годовому интервалу."""
     step = pd.Timedelta(dataset_step)
     forecast_delta = pd.Timedelta(forecast_horizon)
     if forecast_delta < step or forecast_delta % step != pd.Timedelta(0):
@@ -238,6 +255,7 @@ def split_frames(
     current_day: pd.Timestamp | None = None,
     train_days: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, pd.Timestamp]]:
+    """Выбирает способ разбиения данных на обучение и тест."""
     mode = config.get("evaluation_mode", "fixed_year_split")
     if mode == "fixed_year_split":
         return split_fixed_year(
@@ -264,6 +282,7 @@ def split_frames(
 
 
 def split_iterations(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Создает последовательность итераций обучения и проверки."""
     if config.get("evaluation_mode", "fixed_year_split") == "fixed_year_split":
         return [{"split_id": "fixed_2024_train_2025_test", "train_days": None, "test_day": None}]
     return [
@@ -274,6 +293,7 @@ def split_iterations(config: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def numeric_feature_pool(frame: pd.DataFrame, target: str) -> list[str]:
+    """Возвращает числовые признаки, доступные для обучения."""
     excluded = {"hour", "month", "doy"}
     target_prefix = f"{target}_target_"
     columns = []
@@ -287,10 +307,13 @@ def numeric_feature_pool(frame: pd.DataFrame, target: str) -> list[str]:
 
 
 def select_features(train: pd.DataFrame, feature_pool: list[str], min_coverage: float) -> list[str]:
+    """Выбирает признаки с достаточным покрытием данных."""
+    # Признак берется в модель только при достаточной заполненности в train-окне.
     return [feature for feature in feature_pool if feature in train.columns and train[feature].notna().mean() >= min_coverage]
 
 
 def metric_record(y_true: pd.Series, y_pred: pd.Series) -> dict[str, float]:
+    """Рассчитывает метрики качества прогноза."""
     valid = pd.DataFrame({"actual": y_true, "predicted": y_pred}).dropna()
     if valid.empty:
         return {"n": 0, "mae": math.nan, "rmse": math.nan, "r2": math.nan, "corr": math.nan, "bias": math.nan, "mape": math.nan}
@@ -306,6 +329,7 @@ def metric_record(y_true: pd.Series, y_pred: pd.Series) -> dict[str, float]:
 
 
 def make_baseline_predictions(test: pd.DataFrame, model_name: str, target: str, horizon: str) -> pd.Series:
+    """Строит простые baseline-прогнозы для сравнения."""
     if model_name == "persistence_state":
         return pd.to_numeric(test.get(f"{target}_state"), errors="coerce")
     if model_name == "persistence_horizon_lag":
@@ -316,10 +340,12 @@ def make_baseline_predictions(test: pd.DataFrame, model_name: str, target: str, 
 
 
 def default_model_params(model_name: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Возвращает параметры моделей по умолчанию."""
     return dict(config.get("model_params", {}).get(model_name, {}))
 
 
 def make_estimator(model_name: str, config: dict[str, Any], params: dict[str, Any] | None = None) -> object:
+    """Создает объект модели машинного обучения по имени."""
     model_params = default_model_params(model_name, config)
     if params:
         model_params.update(params)
@@ -342,6 +368,8 @@ def impute_frames(
     features: list[str],
     validation: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame | None, pd.DataFrame]:
+    """Заполняет пропуски в обучающих и тестовых признаках."""
+    # Медианы считаются только по train, затем без переобучения применяются к validation/test.
     imputer = SimpleImputer(strategy="median", keep_empty_features=True)
     train_imputed = pd.DataFrame(imputer.fit_transform(train[features]), columns=features, index=train.index)
     test_imputed = pd.DataFrame(imputer.transform(test[features]), columns=features, index=test.index)
@@ -361,6 +389,7 @@ def feature_importance_rows(
     train_days: int | None,
     model_name: str,
 ) -> list[dict[str, Any]]:
+    """Формирует строки важности признаков для обученной модели."""
     values = None
     kind = None
     if hasattr(estimator, "feature_importances_"):
@@ -391,6 +420,7 @@ def feature_importance_rows(
 
 
 def shap_enabled_for(config: dict[str, Any], model_name: str, train_days: int | None) -> bool:
+    """Проверяет, нужно ли считать SHAP для модели."""
     shap_config = config.get("shap", {})
     if not shap_config.get("enabled", False):
         return False
@@ -417,6 +447,7 @@ def shap_summary_rows(
     train_days: int | None,
     model_name: str,
 ) -> list[dict[str, Any]]:
+    """Считает SHAP-важность признаков для модели."""
     if not shap_enabled_for(config, model_name, train_days) or not features:
         return []
 
@@ -500,6 +531,7 @@ def fit_predict_ml(
     model_name: str,
     config: dict[str, Any],
 ) -> tuple[pd.Series, int, object | None]:
+    """Обучает модель и получает прогноз на тестовой выборке."""
     if not selected_features:
         return pd.Series(index=test.index, dtype=float), 0, None
 
@@ -515,10 +547,12 @@ def fit_predict_ml(
 
 
 def objective_direction(metric: str) -> str:
+    """Определяет направление оптимизации метрики."""
     return "maximize" if metric.upper() in {"R2", "CORR", "CC"} else "minimize"
 
 
 def objective_value(metric: str, y_true: pd.Series, y_pred: pd.Series) -> float:
+    """Возвращает значение целевой метрики для подбора параметров."""
     metrics = metric_record(y_true, y_pred)
     key = {"RMSE": "rmse", "MAE": "mae", "R2": "r2", "CORR": "corr", "CC": "corr"}.get(metric.upper())
     if key is None:
@@ -530,6 +564,7 @@ def objective_value(metric: str, y_true: pd.Series, y_pred: pd.Series) -> float:
 
 
 def suggest_from_space(trial: optuna.Trial, name: str, spec: dict[str, Any]) -> Any:
+    """Предлагает значение гиперпараметра из заданного пространства."""
     param_type = spec["type"]
     if param_type == "float":
         return trial.suggest_float(
@@ -547,6 +582,7 @@ def suggest_from_space(trial: optuna.Trial, name: str, spec: dict[str, Any]) -> 
 
 
 def configured_optuna_params(model_name: str, trial: optuna.Trial, config: dict[str, Any]) -> dict[str, Any]:
+    """Получает настройки Optuna из конфигурации эксперимента."""
     spaces = config.get("hyperparameter_spaces", {})
     if model_name not in spaces:
         return {}
@@ -554,6 +590,7 @@ def configured_optuna_params(model_name: str, trial: optuna.Trial, config: dict[
 
 
 def grid_values_from_space(spec: dict[str, Any]) -> list[Any]:
+    """Преобразует описание пространства параметров в значения сетки."""
     if "values" in spec:
         return list(spec["values"])
     param_type = spec["type"]
@@ -579,6 +616,7 @@ def grid_values_from_space(spec: dict[str, Any]) -> list[Any]:
 
 
 def parameter_grid_from_config(model_name: str, config: dict[str, Any]) -> dict[str, list[Any]]:
+    """Формирует сетку параметров из конфигурации."""
     spaces = config.get("hyperparameter_spaces", {})
     if model_name not in spaces:
         return {}
@@ -586,6 +624,7 @@ def parameter_grid_from_config(model_name: str, config: dict[str, Any]) -> dict[
 
 
 def fixed_model_params(model_name: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Возвращает фиксированные параметры модели."""
     config = config or {}
     runtime = config.get("runtime", {})
     n_jobs = int(runtime.get("model_n_jobs", 1))
@@ -602,6 +641,7 @@ def fixed_model_params(model_name: str, config: dict[str, Any] | None = None) ->
 
 
 def sample_optuna_params(model_name: str, trial: optuna.Trial, config: dict[str, Any]) -> dict[str, Any]:
+    """Выбирает параметры модели для одного Optuna trial."""
     configured = configured_optuna_params(model_name, trial, config)
     if model_name in OPTUNA_MODELS:
         return configured | fixed_model_params(model_name, config)
@@ -609,6 +649,7 @@ def sample_optuna_params(model_name: str, trial: optuna.Trial, config: dict[str,
 
 
 def candidate_search_params(model_name: str, config: dict[str, Any], method: str, random_state: int) -> list[dict[str, Any]]:
+    """Формирует кандидаты параметров для поиска без Optuna."""
     grid = parameter_grid_from_config(model_name, config)
     if not grid:
         return [fixed_model_params(model_name, config)]
@@ -633,6 +674,7 @@ def fit_final_tuned_model(
     config: dict[str, Any],
     params: dict[str, Any],
 ) -> tuple[pd.Series, object, int]:
+    """Обучает финальную модель с выбранными параметрами."""
     automl = config.get("automl", {})
     final_train = train
     if automl.get("train_final_on_train_validation", True):
@@ -663,6 +705,7 @@ def run_candidate_search_model(
     output_dir: Path,
     method: str,
 ) -> tuple[pd.Series, dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int, object | None]:
+    """Запускает подбор параметров перебором кандидатов."""
     automl = config.get("automl", {})
     metric = automl.get("metric", "RMSE")
     random_state = int(automl.get("random_state", 42))
@@ -778,6 +821,7 @@ def run_optuna_model(
     train_days: int | None,
     output_dir: Path,
 ) -> tuple[pd.Series, dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int, object | None]:
+    """Запускает Optuna-подбор и обучение модели."""
     automl = config.get("automl", {})
     method = automl.get("method", "optuna_tpe_pruning")
     if method in {"default", "grid_search", "random_search"}:
@@ -809,6 +853,7 @@ def run_optuna_model(
     if valid_train.sum() < int(config["minimum_train_rows"]) or valid_val.sum() < int(config["minimum_eval_rows"]):
         return pd.Series(index=test.index, dtype=float), {}, [], [], [], int(valid_train.sum()), None
 
+    # Optuna подбирает параметры на validation, а test остается отложенным набором для финальной оценки.
     x_train, x_val, x_test = impute_frames(train.loc[valid_train], test, selected_features, validation.loc[valid_val])
     assert x_val is not None
     y_train_fit = y_train.loc[valid_train]
@@ -832,6 +877,7 @@ def run_optuna_model(
     )
 
     def objective(trial: optuna.Trial) -> float:
+        """Выполняет вспомогательный шаг objective в текущем сценарии."""
         params = sample_optuna_params(model_name, trial, config)
         model = make_estimator(model_name, config, params=params)
         model.fit(x_train, y_train_fit)
@@ -929,6 +975,7 @@ def append_metric_and_predictions(
     y_pred: pd.Series,
     extra: dict[str, Any] | None = None,
 ) -> None:
+    """Добавляет метрики и прогнозы одной итерации в накопители."""
     y_test = pd.to_numeric(test[target_column], errors="coerce")
     metrics = metric_record(y_test, y_pred)
     if metrics["n"] <= 0:
@@ -982,6 +1029,7 @@ def run_station(
     list[dict[str, Any]],
     list[dict[str, Any]],
 ]:
+    """Запускает полный ML-эксперимент для одной станции."""
     path = Path(config["feature_dir"]) / "stations" / f"{station}_features.csv"
     if not path.exists():
         raise FileNotFoundError(path)
@@ -1019,6 +1067,7 @@ def run_station(
                 current_day=iteration["test_day"],
                 train_days=iteration["train_days"],
             )
+            # После разбиения признаки выбираются заново: покрытие меняется от окна к окну.
             selected_features = select_features(train, feature_pool, float(config["minimum_feature_coverage"]))
             y_test = pd.to_numeric(test[target_column], errors="coerce")
             if (
@@ -1176,6 +1225,7 @@ def run_station(
 
 
 def append_csv(rows: list[dict[str, Any]], path: Path) -> None:
+    """Добавляет строки в CSV-файл."""
     if not rows:
         return
     df = pd.DataFrame(rows)
@@ -1184,6 +1234,7 @@ def append_csv(rows: list[dict[str, Any]], path: Path) -> None:
 
 
 def append_prediction_frames(frames: list[pd.DataFrame], path: Path) -> None:
+    """Добавляет таблицы прогнозов в общий список."""
     if not frames:
         return
     df = pd.concat(frames, ignore_index=True)
@@ -1204,6 +1255,7 @@ def write_partial_station_outputs(
     horizon: str,
     split_id: str,
 ) -> None:
+    """Сохраняет промежуточные результаты станции."""
     append_csv(metrics, station_dir / "partial_metrics.csv")
     append_prediction_frames(predictions, station_dir / "partial_predictions.csv")
     append_csv(trials, station_dir / "partial_optuna_trials.csv")
@@ -1223,6 +1275,7 @@ def write_partial_station_outputs(
 
 
 def write_table(df: pd.DataFrame, csv_path: Path, parquet_path: Path | None = None) -> None:
+    """Сохраняет таблицу в CSV и Parquet при необходимости."""
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(csv_path, index=False)
     if parquet_path is not None and not df.empty:
@@ -1231,6 +1284,7 @@ def write_table(df: pd.DataFrame, csv_path: Path, parquet_path: Path | None = No
 
 
 def season_name(month: int) -> str:
+    """Возвращает название сезона по номеру месяца."""
     if month in {12, 1, 2}:
         return "Зима"
     if month in {3, 4, 5}:
@@ -1241,12 +1295,14 @@ def season_name(month: int) -> str:
 
 
 def fmt_metric(value: Any, digits: int = 3, suffix: str = "") -> str:
+    """Форматирует числовую метрику для markdown-отчета."""
     if value is None or pd.isna(value):
         return "-"
     return f"{float(value):.{digits}f}{suffix}"
 
 
 def model_label(model: str) -> str:
+    """Возвращает читаемое название модели."""
     labels = {
         "persistence_state": "Persistence state",
         "persistence_horizon_lag": "Persistence lag",
@@ -1256,6 +1312,7 @@ def model_label(model: str) -> str:
 
 
 def available_report_metrics(df: pd.DataFrame) -> list[tuple[str, str, int, str]]:
+    """Определяет метрики, доступные для отчета."""
     candidates = [
         ("r2", "R2", 3, ""),
         ("rmse", "RMSE", 2, ""),
@@ -1266,6 +1323,7 @@ def available_report_metrics(df: pd.DataFrame) -> list[tuple[str, str, int, str]
 
 
 def seasonal_metrics_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
+    """Собирает таблицу сезонных метрик."""
     if metrics_df.empty or "test_start" not in metrics_df.columns:
         return pd.DataFrame()
     df = metrics_df.copy()
@@ -1288,6 +1346,7 @@ def seasonal_metrics_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def markdown_metrics_table(seasonal_df: pd.DataFrame, horizon: str, train_days: Any) -> list[str]:
+    """Формирует markdown-таблицу метрик."""
     subset = seasonal_df[(seasonal_df["horizon"] == horizon) & (seasonal_df["train_days"] == train_days)]
     if subset.empty:
         return []
@@ -1317,6 +1376,7 @@ def markdown_metrics_table(seasonal_df: pd.DataFrame, horizon: str, train_days: 
 
 
 def seasonal_analysis_lines(seasonal_df: pd.DataFrame, horizon: str, train_days: Any) -> list[str]:
+    """Готовит текстовые выводы по сезонному анализу."""
     subset = seasonal_df[(seasonal_df["horizon"] == horizon) & (seasonal_df["train_days"] == train_days)]
     if subset.empty:
         return []
@@ -1349,6 +1409,7 @@ def seasonal_analysis_lines(seasonal_df: pd.DataFrame, horizon: str, train_days:
 
 
 def feature_importance_analysis_lines(importance_df: pd.DataFrame) -> list[str]:
+    """Готовит текстовые выводы по важности признаков."""
     if importance_df.empty or not {"model", "feature", "importance_abs"}.issubset(importance_df.columns):
         return []
     lines = ["### Важность признаков", ""]
@@ -1376,6 +1437,7 @@ def write_station_markdown_report(
     importance_df: pd.DataFrame,
     report_path: Path,
 ) -> None:
+    """Создает markdown-отчет по отдельной станции."""
     seasonal_df = seasonal_metrics_table(metrics_df)
     lines = [
         f"# Отчет по станции {station}",
@@ -1417,6 +1479,7 @@ def write_station_outputs(
     feature_importance: list[dict[str, Any]],
     shap_summary: list[dict[str, Any]],
 ) -> dict[str, int]:
+    """Сохраняет все результаты эксперимента по станции."""
     station_dir = output_dir / "stations" / station
     station_dir.mkdir(parents=True, exist_ok=True)
     prefix = output_prefix(config, station)
@@ -1481,6 +1544,7 @@ def write_outputs(
     prediction_rows: int,
     station_summaries: list[dict[str, Any]],
 ) -> None:
+    """Сохраняет итоговые результаты всего эксперимента."""
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_df = pd.DataFrame(metrics)
     trials_df = pd.DataFrame(trials)
@@ -1599,6 +1663,7 @@ def write_outputs(
 
 
 def dry_run(config: dict[str, Any], stations: list[str], horizons: list[str], run_automl: bool) -> None:
+    """Проверяет настройки запуска без обучения моделей."""
     iterations = split_iterations(config)
     regular_models = len(config.get("models", []))
     optuna_models = len(config.get("automl", {}).get("models", [])) if run_automl and config.get("automl", {}).get("enabled") else 0
@@ -1646,6 +1711,7 @@ def dry_run(config: dict[str, Any], stations: list[str], horizons: list[str], ru
 
 
 def main() -> None:
+    """Запускает основной сценарий файла."""
     args = parse_args()
     config = load_config(Path(args.config))
     config.setdefault("run_started_utc", utc_run_stamp())

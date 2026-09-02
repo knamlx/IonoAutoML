@@ -54,6 +54,7 @@ CORE_GIRO_POSITIONS = {name: GIRO_MEASUREMENTS.index(name) for name in CORE_GIRO
 
 
 def main() -> None:
+    """Запускает основной сценарий файла."""
     parser = argparse.ArgumentParser(description="Normalize collected GIRO and index data to one time grid.")
     parser.add_argument("--giro-raw-dir", default="data_2024_2025_giro/raw/giro")
     parser.add_argument("--processed-dir", default="cleaned_2024_2025/processed")
@@ -138,6 +139,7 @@ def main() -> None:
 
 
 def load_time_config(path: Path) -> dict[str, Any]:
+    """Загружает настройки нормализации временной сетки."""
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as fh:
@@ -145,6 +147,7 @@ def load_time_config(path: Path) -> dict[str, Any]:
 
 
 def choose_target_frequency(freq_arg: str, time_config: dict[str, Any], times: pd.Series) -> str:
+    """Выбирает целевую частоту временной сетки."""
     if freq_arg != "auto":
         return freq_arg
     configured = time_config.get("target_frequency")
@@ -154,6 +157,7 @@ def choose_target_frequency(freq_arg: str, time_config: dict[str, Any], times: p
 
 
 def scan_giro_station_stats(raw_dir: Path) -> dict[str, dict[str, int]]:
+    """Сканирует GIRO-данные и собирает статистику по станциям."""
     stats: dict[str, dict[str, int]] = defaultdict(lambda: {"files": 0, "data_lines": 0})
     for path in sorted(raw_dir.rglob("*.txt")):
         station = get_path_value(path, "station")
@@ -169,6 +173,7 @@ def scan_giro_station_stats(raw_dir: Path) -> dict[str, dict[str, int]]:
 
 
 def choose_top_stations(raw_station_stats: dict[str, dict[str, int]], top_stations: int) -> set[str] | None:
+    """Выбирает станции с наилучшим покрытием данных."""
     if top_stations <= 0:
         return None
     ranked = sorted(
@@ -180,6 +185,7 @@ def choose_top_stations(raw_station_stats: dict[str, dict[str, int]], top_statio
 
 
 def load_station_set(path: Path) -> set[str]:
+    """Загружает список станций для обработки."""
     payload = load_time_config(path)
     stations = payload.get("stations", [])
     if not stations:
@@ -192,6 +198,7 @@ def read_giro_raw(
     include_stations: set[str] | None = None,
     raw_station_stats: dict[str, dict[str, int]] | None = None,
 ) -> pd.DataFrame:
+    """Читает сырые GIRO-файлы в общий табличный набор."""
     rows: list[dict[str, Any]] = []
     raw_station_stats = raw_station_stats or {}
     for path in sorted(raw_dir.rglob("*.txt")):
@@ -223,6 +230,7 @@ def read_giro_raw(
 
 
 def parse_giro_line(line: str) -> dict[str, Any] | None:
+    """Разбирает одну строку GIRO-данных."""
     parts = re.split(r"\s+", line.strip())
     if len(parts) < 3:
         return None
@@ -234,6 +242,7 @@ def parse_giro_line(line: str) -> dict[str, Any] | None:
 
 
 def to_number(value: Any) -> float | None:
+    """Преобразует значение в число."""
     value = missing_to_none(value)
     if value is None:
         return None
@@ -244,6 +253,7 @@ def to_number(value: Any) -> float | None:
 
 
 def missing_to_none(value: Any) -> str | None:
+    """Заменяет служебные пропуски на None."""
     if value is None:
         return None
     text = str(value).strip()
@@ -253,6 +263,7 @@ def missing_to_none(value: Any) -> str | None:
 
 
 def get_path_value(path: Path, key: str) -> str:
+    """Извлекает вложенное значение из словаря по пути ключей."""
     prefix = f"{key}="
     for part in path.parts:
         if part.startswith(prefix):
@@ -261,6 +272,7 @@ def get_path_value(path: Path, key: str) -> str:
 
 
 def infer_frequency(times: pd.Series) -> str:
+    """Оценивает фактический временной шаг ряда."""
     rounded = pd.to_datetime(times, utc=True).sort_values().drop_duplicates()
     deltas = rounded.diff().dropna().dt.total_seconds()
     deltas = deltas[(deltas > 0) & (deltas <= 3600)]
@@ -275,16 +287,20 @@ def infer_frequency(times: pd.Series) -> str:
 
 
 def normalize_giro(df: pd.DataFrame, freq: str, min_cs: float, max_interpolate_gap: str) -> pd.DataFrame:
+    """Приводит GIRO-наблюдения к регулярной временной сетке."""
+    # Сначала отбрасываются измерения с плохим CS, чтобы регулярная сетка не строилась на заведомо слабых точках.
     filtered = df[(df["CS"].isna()) | (df["CS"] == -1) | (df["CS"] >= min_cs)].copy()
     numeric_columns = [column for column in ["CS", *CORE_GIRO_COLUMNS] if column in filtered.columns]
     pieces = []
     for station, station_df in filtered.groupby("station", sort=True):
         station_df = station_df.sort_values("time_utc").drop_duplicates("time_utc", keep="last")
         station_df = station_df.set_index("time_utc")
+        # Несколько наблюдений внутри одного интервала сворачиваются в среднее значение этого интервала.
         resampled = station_df[numeric_columns].resample(freq).mean()
         original_counts = station_df.resample(freq).size().reindex(resampled.index, fill_value=0)
         exclusive_end = infer_exclusive_period_end(station_df.index)
         if exclusive_end is not None:
+            # Правая граница вида 2026-01-01 00:00 не включается в период 2024-2025.
             resampled = resampled[resampled.index < exclusive_end]
             original_counts = original_counts.reindex(resampled.index, fill_value=0)
         resampled["station"] = station
@@ -300,6 +316,7 @@ def normalize_giro(df: pd.DataFrame, freq: str, min_cs: float, max_interpolate_g
 
 
 def infer_exclusive_period_end(index: pd.DatetimeIndex) -> pd.Timestamp | None:
+    """Определяет правую границу временного периода."""
     if index.empty:
         return None
     last = index.max()
@@ -309,6 +326,7 @@ def infer_exclusive_period_end(index: pd.DatetimeIndex) -> pd.Timestamp | None:
 
 
 def make_interval(times: pd.Series, freq: str) -> pd.Series:
+    """Формирует подпись временного интервала."""
     delta = pd.to_timedelta(freq)
     starts = pd.to_datetime(times, utc=True)
     ends = starts + delta
@@ -316,6 +334,7 @@ def make_interval(times: pd.Series, freq: str) -> pd.Series:
 
 
 def prepare_index_features(processed_dir: Path, freq: str, time_config: dict[str, Any]) -> pd.DataFrame:
+    """Подготавливает индексные признаки для совмещения с GIRO."""
     variable_rules = time_config.get("variables", {})
     frames = []
     gfz_path = processed_dir / "geophysical_indices.csv"
@@ -347,6 +366,7 @@ def prepare_index_features(processed_dir: Path, freq: str, time_config: dict[str
 
 
 def propagate_interval_features(frame: pd.DataFrame, freq: str, variable_rules: dict[str, Any]) -> pd.DataFrame:
+    """Распространяет индексные признаки на интервалы их действия."""
     if frame.empty:
         return frame
     start = frame.index.min().floor(freq)
@@ -358,6 +378,7 @@ def propagate_interval_features(frame: pd.DataFrame, freq: str, variable_rules: 
     for column in frame.columns:
         valid_for = pd.to_timedelta(variable_rules.get(column, {}).get("valid_for", "0s"))
         provenance_name = provenance_column_name(column)
+        # Индексы вроде Kp/Ap действуют интервалами, поэтому значение переносится вперед только до valid_until.
         values = frame[column].resample(freq).ffill().reindex(grid).ffill()
         propagated_source = source_times.resample(freq).ffill().reindex(grid).ffill()
         valid_until = propagated_source + valid_for
@@ -370,6 +391,7 @@ def propagate_interval_features(frame: pd.DataFrame, freq: str, variable_rules: 
 
 
 def provenance_column_name(column: str) -> str:
+    """Формирует имя столбца с источником или временем происхождения признака."""
     aliases = {
         "gfz_Kp": "Kp",
         "gfz_ap": "ap",
@@ -385,6 +407,7 @@ def provenance_column_name(column: str) -> str:
 
 
 def write_station_datasets(analytical: pd.DataFrame, output_dir: Path) -> list[Path]:
+    """Сохраняет нормализованные наборы данных по станциям."""
     station_dir = output_dir / "stations"
     station_dir.mkdir(parents=True, exist_ok=True)
     station_files = []
@@ -403,6 +426,7 @@ def write_station_quality_reports(
     freq: str,
     selection_rules: dict[str, Any],
 ) -> tuple[list[Path], list[dict[str, Any]]]:
+    """Создает отчеты качества по каждой станции."""
     report_dir = output_dir / "reports" / "station_quality"
     report_dir.mkdir(parents=True, exist_ok=True)
     files = []
@@ -505,15 +529,18 @@ def write_station_quality_reports(
 
 
 def write_quality_summary(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Сохраняет сводную таблицу качества станций."""
     path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).sort_values(["quality_class", "station"]).to_csv(path, index=False)
 
 
 def percent(count: int, total: int) -> float:
+    """Переводит отношение в проценты."""
     return round(count / total * 100, 2) if total else 0.0
 
 
 def classify_station_quality(original_percent: float, missing_percent: float, selection_rules: dict[str, Any]) -> str:
+    """Присваивает станции класс качества по покрытию данных."""
     classes = selection_rules.get("quality_classes", {})
     for name in ("good", "usable", "weak"):
         rule = classes.get(name, {})
@@ -525,6 +552,7 @@ def classify_station_quality(original_percent: float, missing_percent: float, se
 
 
 def longest_missing_gap_hours(mask: pd.Series, freq: str) -> float:
+    """Вычисляет максимальную длину пропуска во временном ряду."""
     if mask.empty:
         return 0.0
     max_run = 0
@@ -539,6 +567,7 @@ def longest_missing_gap_hours(mask: pd.Series, freq: str) -> float:
 
 
 def grouped_coverage(df: pd.DataFrame, present_mask: pd.Series, groups: pd.Series) -> dict[str, dict[str, Any]]:
+    """Считает покрытие данных по группам."""
     result: dict[str, dict[str, Any]] = {}
     original_mask = df["had_original_giro_row"].astype(bool) & present_mask
     valid_groups = [group for group in groups.dropna().unique().tolist() if group != "2026"]
@@ -558,6 +587,7 @@ def grouped_coverage(df: pd.DataFrame, present_mask: pd.Series, groups: pd.Serie
 
 
 def period_coverage(df: pd.DataFrame, present_mask: pd.Series, period: dict[str, Any]) -> dict[str, Any]:
+    """Считает покрытие данных за заданный период."""
     start = pd.to_datetime(period.get("start"), utc=True, errors="coerce")
     end = pd.to_datetime(period.get("end"), utc=True, errors="coerce")
     if pd.isna(start) or pd.isna(end):
@@ -579,6 +609,7 @@ def period_coverage(df: pd.DataFrame, present_mask: pd.Series, period: dict[str,
 
 
 def season_name(month: int) -> str:
+    """Возвращает название сезона по номеру месяца."""
     if month in (12, 1, 2):
         return "winter"
     if month in (3, 4, 5):
@@ -589,6 +620,7 @@ def season_name(month: int) -> str:
 
 
 def cs_summary(df: pd.DataFrame) -> dict[str, Any]:
+    """Собирает статистику качества ионосферных измерений по CS."""
     if "CS" not in df.columns:
         return {}
     cs = pd.to_numeric(df["CS"], errors="coerce").dropna()
@@ -606,12 +638,14 @@ def cs_summary(df: pd.DataFrame) -> dict[str, Any]:
 
 
 def stringify_timestamp(value: Any) -> str:
+    """Преобразует timestamp в строку для отчетов."""
     if pd.isna(value):
         return ""
     return pd.Timestamp(value).isoformat()
 
 
 def build_station_coverage(giro: pd.DataFrame) -> pd.DataFrame:
+    """Формирует сводку покрытия данных по станциям."""
     raw_stats = giro.attrs.get("raw_station_stats", {})
     if giro.empty:
         rows = [{"station": station, "data_rows": stats["data_lines"], "raw_files": stats["files"], "start_utc": pd.NaT, "end_utc": pd.NaT} for station, stats in raw_stats.items()]
@@ -649,6 +683,7 @@ def write_report(
     quality_files: list[Path],
     quality_only: bool = False,
 ) -> None:
+    """Формирует текстовый отчет по результатам обработки."""
     source_missing = missing_summary(giro, ["foF2", "MUF_D", "hmF2", "TEC", "fmin", "foF2p"])
     normalized_missing = missing_summary(normalized, ["foF2", "MUF_D", "hmF2", "TEC", "fmin", "foF2p"])
     lines = [
@@ -692,6 +727,7 @@ def write_report(
 
 
 def missing_summary(df: pd.DataFrame, columns: list[str]) -> dict[str, float]:
+    """Формирует краткое описание пропусков по столбцам."""
     if df.empty:
         return {}
     result = {}
@@ -702,6 +738,7 @@ def missing_summary(df: pd.DataFrame, columns: list[str]) -> dict[str, float]:
 
 
 def format_missing(values: dict[str, float]) -> str:
+    """Форматирует информацию о пропусках для отчета."""
     if not values:
         return "No values."
     return "\n".join(f"- {column}: {percent:.2f}%" for column, percent in values.items())

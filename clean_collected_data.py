@@ -15,6 +15,7 @@ DEFAULT_COLUMN_MISSING_THRESHOLD = 0.45
 
 
 def main() -> None:
+    """Запускает основной сценарий файла."""
     parser = argparse.ArgumentParser(description="Create a soft-cleaned copy of collected ionosphere datasets.")
     parser.add_argument("--input-dir", default="data_2024_2025_indices", help="Directory with processed CSV files.")
     parser.add_argument("--giro-raw-dir", default="data_2024_2025_giro/raw/giro", help="Directory with raw GIRO txt files.")
@@ -48,6 +49,7 @@ def main() -> None:
 
 
 def clean_csv(csv_path: Path, output_path: Path, row_threshold: float, column_threshold: float) -> dict[str, Any]:
+    """Очищает CSV-файл и сохраняет нормализованную версию данных."""
     rows, columns = read_csv(csv_path)
     report: dict[str, Any] = {
         "file": csv_path.name,
@@ -87,6 +89,7 @@ def clean_csv(csv_path: Path, output_path: Path, row_threshold: float, column_th
 
 
 def read_csv(path: Path) -> tuple[list[dict[str, str]], list[str]]:
+    """Читает CSV-файл в список словарей."""
     with path.open("r", encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
         columns = list(reader.fieldnames or [])
@@ -94,6 +97,7 @@ def read_csv(path: Path) -> tuple[list[dict[str, str]], list[str]]:
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]], columns: list[str]) -> None:
+    """Записывает строки словарей в CSV-файл."""
     with path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
@@ -101,22 +105,26 @@ def write_csv(path: Path, rows: list[dict[str, Any]], columns: list[str]) -> Non
 
 
 def write_json(path: Path, rows: list[dict[str, Any]], name: str) -> None:
+    """Сохраняет словарь или список в JSON-файл."""
     payload = {"dataset": name, "records": rows}
     with path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
 
 
 def is_missing(value: Any) -> bool:
+    """Проверяет, является ли значение пропуском."""
     return value is None or str(value).strip().lower() in MISSING_VALUES
 
 
 def row_missing_fraction(row: dict[str, Any], columns: list[str]) -> float:
+    """Вычисляет долю пропусков в одной строке таблицы."""
     if not columns:
         return 1.0
     return sum(1 for column in columns if is_missing(row.get(column))) / len(columns)
 
 
 def missing_percentages(rows: list[dict[str, Any]], columns: list[str]) -> dict[str, float]:
+    """Считает процент пропусков по столбцам."""
     if not rows:
         return {}
     result = {}
@@ -127,6 +135,7 @@ def missing_percentages(rows: list[dict[str, Any]], columns: list[str]) -> dict[
 
 
 def choose_columns(rows: list[dict[str, Any]], columns: list[str], threshold: float) -> list[str]:
+    """Выбирает столбцы, которые нужно оставить в очищенном наборе данных."""
     keep = []
     for column in columns:
         missing = sum(1 for row in rows if is_missing(row.get(column)))
@@ -137,6 +146,7 @@ def choose_columns(rows: list[dict[str, Any]], columns: list[str], threshold: fl
 
 
 def apply_known_fills(file_name: str, rows: list[dict[str, Any]], columns: list[str]) -> dict[str, int]:
+    """Заполняет известные служебные значения по заданным правилам."""
     filled: dict[str, int] = {}
     if file_name == "geophysical_indices.csv" and "status" in columns:
         count = 0
@@ -152,6 +162,7 @@ def apply_known_fills(file_name: str, rows: list[dict[str, Any]], columns: list[
 
 
 def carry_forward_numeric_by_time(rows: list[dict[str, Any]], time_column: str, value_column: str) -> int:
+    """Переносит последнее известное числовое значение вперед по времени."""
     rows.sort(key=lambda row: parse_time(row.get(time_column)) or datetime.max)
     last_value = None
     filled = 0
@@ -166,6 +177,7 @@ def carry_forward_numeric_by_time(rows: list[dict[str, Any]], time_column: str, 
 
 
 def parse_time(value: Any) -> datetime | None:
+    """Преобразует строковое время в объект datetime."""
     if is_missing(value):
         return None
     text = str(value).replace("Z", "+00:00")
@@ -176,6 +188,7 @@ def parse_time(value: Any) -> datetime | None:
 
 
 def parse_float(value: Any) -> float | None:
+    """Преобразует значение в число с плавающей точкой."""
     if is_missing(value):
         return None
     try:
@@ -185,6 +198,7 @@ def parse_float(value: Any) -> float | None:
 
 
 def analyze_giro_raw(raw_dir: Path) -> dict[str, Any]:
+    """Анализирует сырые GIRO-файлы и собирает статистику качества."""
     files = sorted(raw_dir.rglob("*.txt"))
     station_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {"files": 0, "data_lines": 0, "years": set()})
     files_without_data = 0
@@ -223,6 +237,7 @@ def analyze_giro_raw(raw_dir: Path) -> dict[str, Any]:
 
 
 def count_giro_data_lines(path: Path) -> int:
+    """Считает количество строк с данными в GIRO-файле."""
     count = 0
     with path.open("r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
@@ -239,6 +254,7 @@ def write_report(
     row_threshold: float,
     column_threshold: float,
 ) -> None:
+    """Формирует текстовый отчет по результатам обработки."""
     lines = [
         "# Cleaning report",
         "",
@@ -289,6 +305,7 @@ def write_report(
 
 
 def top_missing(values: dict[str, float]) -> str:
+    """Возвращает столбцы с наибольшей долей пропусков."""
     if not values:
         return "none"
     top = sorted(values.items(), key=lambda item: item[1], reverse=True)[:5]
@@ -296,6 +313,7 @@ def top_missing(values: dict[str, float]) -> str:
 
 
 def format_dict(values: dict[str, Any]) -> str:
+    """Форматирует словарь для вывода в отчет."""
     if not values:
         return "none"
     return ", ".join(f"{key}={value}" for key, value in values.items())

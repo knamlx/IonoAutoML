@@ -11,6 +11,7 @@ import collect_hf_data as collector
 
 
 def assert_payload_shape(test_case, payload, dataset, count):
+    """Проверяет структуру сохраненного JSON payload в тестах."""
     test_case.assertEqual(payload["schema_version"], "1.0")
     test_case.assertEqual(payload["dataset"], dataset)
     test_case.assertEqual(payload["record_count"], count)
@@ -19,17 +20,22 @@ def assert_payload_shape(test_case, payload, dataset, count):
 
 
 class JsonOutputTests(unittest.TestCase):
+    """Проверяет корректность JSON-выходов сборщика данных."""
     def test_make_records_payload_has_uniform_shape(self):
+        """Выполняет вспомогательный шаг test_make_records_payload_has_uniform_shape в текущем сценарии."""
         payload = collector.make_records_payload("sample", [{"time_utc": "2026-01-01T00:00:00Z"}])
         assert_payload_shape(self, payload, "sample", 1)
 
     def test_read_json_bytes_accepts_swpc_trailing_nul_bytes(self):
+        """Выполняет вспомогательный шаг test_read_json_bytes_accepts_swpc_trailing_nul_bytes в текущем сценарии."""
         payload = collector.read_json_bytes(b'[["time_tag","speed"],["2026-01-01 00:00:00.000","400"]]\x00\x00')
         self.assertEqual(payload[0], ["time_tag", "speed"])
 
 
 class ParserTests(unittest.TestCase):
+    """Проверяет функции разбора внешних источников данных."""
     def test_collect_noaa_normalizes_table_json(self):
+        """Выполняет вспомогательный шаг test_collect_noaa_normalizes_table_json в текущем сценарии."""
         config = {
             "noaa": {
                 "enabled": True,
@@ -59,6 +65,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(rows[0]["speed"], "410.2")
 
     def test_parse_giro_table_normalizes_success_and_error_rows(self):
+        """Выполняет вспомогательный шаг test_parse_giro_table_normalizes_success_and_error_rows в текущем сценарии."""
         text = "\n".join(
             [
                 "# Time CS foF2 MUFD hmF2 TEC fmin",
@@ -76,10 +83,12 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(rows[1]["error"], "ERROR: No data found for requested period")
 
     def test_parse_giro_station_codes_deduplicates_form_options(self):
+        """Выполняет вспомогательный шаг test_parse_giro_station_codes_deduplicates_form_options в текущем сценарии."""
         html = '<select name="location"><option value="MO155">MOSCOW</option><option value="MO155">MOSCOW</option><option value="BC840">BOULDER</option></select>'
         self.assertEqual(collector.parse_giro_station_codes(html), ["MO155", "BC840"])
 
     def test_parse_giro_station_options_keeps_station_labels(self):
+        """Выполняет вспомогательный шаг test_parse_giro_station_options_keeps_station_labels в текущем сценарии."""
         html = '<option value="MO155">Moscow Parus-A</option><option value="BC840">Boulder</option>'
         self.assertEqual(
             collector.parse_giro_station_options(html),
@@ -87,6 +96,7 @@ class ParserTests(unittest.TestCase):
         )
 
     def test_iter_time_windows_splits_long_collection_periods(self):
+        """Выполняет вспомогательный шаг test_iter_time_windows_splits_long_collection_periods в текущем сценарии."""
         start = collector.parse_dt("2024-01-01T00:00:00Z")
         end = collector.parse_dt("2024-03-01T00:00:00Z")
         windows = collector.iter_time_windows(start, end, 31)
@@ -95,6 +105,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(windows[-1][1], end)
 
     def test_iter_time_windows_never_crosses_calendar_year_boundary(self):
+        """Выполняет вспомогательный шаг test_iter_time_windows_never_crosses_calendar_year_boundary в текущем сценарии."""
         start = collector.parse_dt("2024-01-01T00:00:00Z")
         end = collector.parse_dt("2026-01-01T00:00:00Z")
         windows = collector.iter_time_windows(start, end, 999)
@@ -107,10 +118,12 @@ class ParserTests(unittest.TestCase):
         )
 
     def test_normalize_giro_headers_keeps_quality_columns(self):
+        """Выполняет вспомогательный шаг test_normalize_giro_headers_keeps_quality_columns в текущем сценарии."""
         headers = collector.normalize_giro_headers(["Time", "CS", "foF2", "QD", "TEC", "QD"])
         self.assertEqual(headers, ["Time", "CS", "foF2", "foF2_QD", "TEC", "TEC_QD"])
 
     def test_build_analytical_dataset_uses_giro_mufd_column(self):
+        """Выполняет вспомогательный шаг test_build_analytical_dataset_uses_giro_mufd_column в текущем сценарии."""
         rows = [
             {
                 "station": "MO155",
@@ -124,6 +137,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(dataset[0]["muf_3000_proxy_MHz"], 15.583)
 
     def test_parse_gfz_index_payload_normalizes_records(self):
+        """Выполняет вспомогательный шаг test_parse_gfz_index_payload_normalizes_records в текущем сценарии."""
         payload = {
             "Kp": [0.667],
             "datetime": ["2024-01-01T00:00:00Z"],
@@ -145,6 +159,7 @@ class ParserTests(unittest.TestCase):
         )
 
     def test_build_analytical_dataset_adds_nearest_gfz_index_features(self):
+        """Выполняет вспомогательный шаг test_build_analytical_dataset_adds_nearest_gfz_index_features в текущем сценарии."""
         giro_rows = [{"station": "MO155", "time_utc": "2024-01-01T01:00:00Z", "foF2": "5.0"}]
         gfz_rows = [
             {"index": "Kp", "time_utc": "2024-01-01T00:00:00Z", "value": 0.667, "status": "def"},
@@ -156,6 +171,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(dataset[0]["Ap"], 7)
 
     def test_parse_omni_hourly_listing_normalizes_rows(self):
+        """Выполняет вспомогательный шаг test_parse_omni_hourly_listing_normalizes_rows в текущем сценарии."""
         text = """
         <pre>YEAR DOY HR    1     2
         2024   1  0  -2.8  -11
@@ -170,7 +186,9 @@ class ParserTests(unittest.TestCase):
 
 
 class EndToEndJsonTests(unittest.TestCase):
+    """Проверяет полный сценарий сохранения JSON-данных."""
     def test_main_writes_uniform_json_outputs(self):
+        """Выполняет вспомогательный шаг test_main_writes_uniform_json_outputs в текущем сценарии."""
         noaa_raw = {
             "https://example.test/kp.json": json.dumps(
                 [{"time_tag": "2026-01-01T00:00:00", "estimated_kp": 2.0}]
@@ -187,6 +205,7 @@ class EndToEndJsonTests(unittest.TestCase):
         }
 
         def fake_fetch(url, *, data, timeout, attempts=3):
+            """Выполняет вспомогательный шаг fake_fetch в текущем сценарии."""
             return noaa_raw[url]
 
         with tempfile.TemporaryDirectory() as tmp:

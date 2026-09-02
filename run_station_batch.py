@@ -11,6 +11,7 @@ from run_ml_baselines import load_config, resolve_stations
 
 
 def parse_args() -> argparse.Namespace:
+    """Разбирает параметры запуска из командной строки."""
     parser = argparse.ArgumentParser(description="Run full ML experiment station by station.")
     parser.add_argument("--config", default="configs/experiments/baseline_v0.1.json")
     parser.add_argument("--station", action="append", default=None, help="Station to run. Can be repeated.")
@@ -26,6 +27,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def read_station_file(path: str | None) -> list[str]:
+    """Читает список станций из файла."""
     if not path:
         return []
     return [
@@ -36,11 +38,13 @@ def read_station_file(path: str | None) -> list[str]:
 
 
 def station_done(output_dir: Path, station: str) -> bool:
+    """Проверяет, завершен ли запуск для станции."""
     station_dir = output_dir / "stations" / station
     return (station_dir / "run_summary.json").exists() or any(station_dir.glob("*_run_summary.json"))
 
 
 def build_command(args: argparse.Namespace, config_path: Path, station: str) -> list[str]:
+    """Формирует команду запуска станции."""
     command = [
         sys.executable,
         "run_ml_baselines.py",
@@ -57,11 +61,13 @@ def build_command(args: argparse.Namespace, config_path: Path, station: str) -> 
 
 
 def log_path_for(log_dir: Path, station: str) -> Path:
+    """Формирует путь к лог-файлу станции."""
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return log_dir / f"{timestamp}_{station}.log"
 
 
 def run_command(command: list[str], log_path: Path) -> int:
+    """Запускает одну команду обработки станции."""
     with log_path.open("w", encoding="utf-8") as log_file:
         started = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         log_file.write(f"started_utc={started}\n")
@@ -75,6 +81,7 @@ def run_command(command: list[str], log_path: Path) -> int:
 
 
 def run_parallel(commands: list[tuple[str, list[str], Path]], max_parallel: int) -> None:
+    """Запускает несколько станций параллельно."""
     active: list[tuple[str, subprocess.Popen, object, Path]] = []
     pending = list(commands)
     while pending or active:
@@ -113,6 +120,7 @@ def run_parallel(commands: list[tuple[str, list[str], Path]], max_parallel: int)
 
 
 def main() -> None:
+    """Запускает основной сценарий файла."""
     args = parse_args()
     config_path = Path(args.config)
     config = load_config(config_path)

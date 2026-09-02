@@ -7,7 +7,9 @@ from run_ml_baselines import impute_frames
 
 
 class ImputeFrameTests(unittest.TestCase):
+    """Проверяет заполнение пропусков в ML-признаках."""
     def test_impute_frames_preserves_empty_training_features(self):
+        """Выполняет вспомогательный шаг test_impute_frames_preserves_empty_training_features в текущем сценарии."""
         features = ["observed", "empty_in_train"]
         train = pd.DataFrame(
             {

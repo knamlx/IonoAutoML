@@ -82,6 +82,7 @@ GIRO_DATA_URL = "https://giro.uml.edu/didbase/scaled.php"
 
 @dataclass(frozen=True)
 class Paths:
+    """Хранит основные пути, используемые при сборе и сохранении данных."""
     root: Path
     raw_noaa: Path
     raw_gfz: Path
@@ -93,6 +94,7 @@ class Paths:
 
 
 def parse_args() -> argparse.Namespace:
+    """Разбирает параметры запуска из командной строки."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="config.example.toml", help="Path to TOML config.")
     parser.add_argument("--start", help="UTC start, e.g. 2026-05-26T00:00:00Z.")
@@ -107,11 +109,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_config(path: str) -> dict[str, Any]:
+    """Загружает конфигурацию эксперимента или сбора данных из файла."""
     with open(path, "rb") as fh:
         return tomllib.load(fh)
 
 
 def parse_dt(value: str | None) -> datetime | None:
+    """Преобразует строку даты и времени в UTC-время."""
     if not value:
         return None
     text = value.strip()
@@ -129,6 +133,7 @@ def parse_dt(value: str | None) -> datetime | None:
 
 
 def resolve_interval(args: argparse.Namespace, config: dict[str, Any]) -> tuple[datetime, datetime]:
+    """Определяет временной интервал сбора данных."""
     run_cfg = config.get("run", {})
     end = parse_dt(args.end) or parse_dt(run_cfg.get("end_utc")) or datetime.now(UTC)
     start = parse_dt(args.start) or parse_dt(run_cfg.get("start_utc"))
@@ -140,6 +145,7 @@ def resolve_interval(args: argparse.Namespace, config: dict[str, Any]) -> tuple[
 
 
 def init_paths(config: dict[str, Any], args: argparse.Namespace) -> Paths:
+    """Создает и возвращает структуру рабочих папок проекта."""
     out_dir = Path(args.output_dir or config.get("run", {}).get("output_dir", "data"))
     paths = Paths(
         root=out_dir,
@@ -157,6 +163,7 @@ def init_paths(config: dict[str, Any], args: argparse.Namespace) -> Paths:
 
 
 def fetch_url(url: str, *, data: dict[str, Any] | None, timeout: int, attempts: int = 3) -> bytes:
+    """Загружает содержимое URL с повторными попытками."""
     body = urlencode(data, doseq=True).encode("utf-8") if data else None
     if "giro.uml.edu" in url:
         return fetch_url_with_powershell(url, body=body, timeout=timeout)
@@ -179,6 +186,7 @@ def fetch_url(url: str, *, data: dict[str, Any] | None, timeout: int, attempts: 
 
 
 def fetch_url_with_powershell(url: str, *, body: bytes | None, timeout: int) -> bytes:
+    """Загружает URL через PowerShell, если обычный запрос не подходит."""
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         out_path = tmp.name
     env = os.environ.copy()
@@ -217,19 +225,23 @@ if ([string]::IsNullOrEmpty($env:FETCH_BODY)) {
 
 
 def safe_name(value: str) -> str:
+    """Преобразует строку в безопасное имя для файлов и папок."""
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("_")
 
 
 def write_json(path: Path, payload: Any) -> None:
+    """Сохраняет словарь или список в JSON-файл."""
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    """Добавляет одну JSON-запись в JSONL-файл."""
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def make_records_payload(dataset: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Формирует payload с метаданными и записями данных."""
     return {
         "schema_version": "1.0",
         "dataset": dataset,
@@ -239,15 +251,18 @@ def make_records_payload(dataset: str, rows: list[dict[str, Any]]) -> dict[str, 
 
 
 def write_records_json(path: Path, dataset: str, rows: list[dict[str, Any]]) -> None:
+    """Сохраняет набор записей в JSON-файл."""
     write_json(path, make_records_payload(dataset, rows))
 
 
 def read_json_bytes(raw: bytes) -> Any:
+    """Читает JSON из байтового ответа."""
     text = raw.decode("utf-8-sig", errors="replace").strip("\x00\r\n\t ")
     return json.loads(text)
 
 
 def normalize_time(value: Any) -> str:
+    """Приводит время из источника к единому UTC-формату."""
     if value is None or value == "":
         return ""
     if isinstance(value, (int, float)):
@@ -260,6 +275,7 @@ def normalize_time(value: Any) -> str:
 
 
 def maybe_float(value: Any) -> float | None:
+    """Пытается преобразовать значение в число, сохраняя пропуски."""
     if value is None:
         return None
     text = str(value).strip()
@@ -272,6 +288,7 @@ def maybe_float(value: Any) -> float | None:
 
 
 def collect_noaa(config: dict[str, Any], paths: Paths, timeout: int) -> list[dict[str, Any]]:
+    """Собирает данные NOAA за заданный период."""
     noaa_cfg = config.get("noaa", {})
     if not noaa_cfg.get("enabled", True):
         return []
@@ -327,6 +344,7 @@ def collect_gfz_indices(
     end: datetime,
     timeout: int,
 ) -> list[dict[str, Any]]:
+    """Собирает геофизические индексы GFZ."""
     gfz_cfg = config.get("gfz", {})
     if not gfz_cfg.get("enabled", True):
         return []
@@ -352,6 +370,7 @@ def collect_gfz_indices(
 
 
 def parse_gfz_index_payload(payload: dict[str, Any], index: str, raw_file: str) -> list[dict[str, Any]]:
+    """Разбирает ответ GFZ и извлекает индексные значения."""
     times = payload.get("datetime", [])
     values = payload.get(index, [])
     statuses = payload.get("status", [])
@@ -383,6 +402,7 @@ OMNI_HOURLY_VARIABLES = {
 
 
 def collect_omni(config: dict[str, Any], paths: Paths, start: datetime, end: datetime, timeout: int) -> list[dict[str, Any]]:
+    """Собирает данные OMNI за заданный период."""
     omni_cfg = config.get("omni", {})
     if not omni_cfg.get("enabled", True):
         return []
@@ -423,6 +443,7 @@ def collect_omni(config: dict[str, Any], paths: Paths, start: datetime, end: dat
 
 
 def parse_omni_hourly_listing(text: str, variables: list[str], raw_file: str) -> list[dict[str, Any]]:
+    """Разбирает часовой листинг OMNI в структурированные строки."""
     pre_match = re.search(r"<pre>(.*?)</pre>", text, flags=re.I | re.S)
     listing = pre_match.group(1) if pre_match else text
     rows: list[dict[str, Any]] = []
@@ -446,6 +467,7 @@ def parse_omni_hourly_listing(text: str, variables: list[str], raw_file: str) ->
 
 
 def is_omni_missing(value: str) -> bool:
+    """Определяет, является ли значение OMNI служебным пропуском."""
     try:
         number = float(value)
     except ValueError:
@@ -454,6 +476,7 @@ def is_omni_missing(value: str) -> bool:
 
 
 def first_time(row: dict[str, Any]) -> str:
+    """Возвращает первое непустое время из набора строк."""
     for key in TIME_KEYS:
         if key in row:
             return normalize_time(row[key])
@@ -461,6 +484,7 @@ def first_time(row: dict[str, Any]) -> str:
 
 
 def giro_characteristic_ids(names: list[str] | str) -> list[int]:
+    """Возвращает идентификаторы характеристик GIRO для запроса."""
     if isinstance(names, str):
         if names.lower() == "all":
             return list(range(38))
@@ -477,6 +501,7 @@ def giro_characteristic_ids(names: list[str] | str) -> list[int]:
 
 
 def parse_giro_station_options(html: str) -> list[dict[str, str]]:
+    """Разбирает список доступных станций GIRO из HTML."""
     location_match = re.search(r'<select[^>]+name="location"[^>]*>(.*?)(?:</select>|</td>)', html, flags=re.I | re.S)
     location_html = location_match.group(1) if location_match else html
     options = re.findall(
@@ -496,10 +521,12 @@ def parse_giro_station_options(html: str) -> list[dict[str, str]]:
 
 
 def parse_giro_station_codes(html: str) -> list[str]:
+    """Извлекает коды станций GIRO из строки конфигурации."""
     return [station["station"] for station in parse_giro_station_options(html)]
 
 
 def resolve_giro_stations(stations: list[str] | str, timeout: int, paths: Paths | None = None) -> list[str]:
+    """Определяет итоговый список станций GIRO для сбора."""
     if isinstance(stations, str):
         if stations.lower() != "all":
             return [stations]
@@ -544,6 +571,7 @@ def collect_giro(
     end: datetime,
     timeout: int,
 ) -> list[dict[str, Any]]:
+    """Собирает наблюдения GIRO по выбранным станциям и окнам времени."""
     if not config.get("giro", {}).get("enabled", True):
         return []
     giro_cfg = config.get("giro", {})
@@ -555,6 +583,7 @@ def collect_giro(
     records: list[dict[str, Any]] = []
     for station in stations:
         for window_start, window_end in windows:
+            # GIRO лучше запрашивать окнами: так проще повторять упавший кусок и не терять весь сбор.
             params = {
                 "query_submit": "Search",
                 "date_start": window_start.strftime("%Y-%m-%d %H:%M"),
@@ -607,6 +636,7 @@ def collect_giro(
 
 
 def parse_giro_table(text: str, station: str, raw_file: str) -> list[dict[str, Any]]:
+    """Разбирает табличный ответ GIRO в строки данных."""
     rows: list[dict[str, Any]] = []
     headers: list[str] | None = None
     for raw_line in text.splitlines():
@@ -614,6 +644,7 @@ def parse_giro_table(text: str, station: str, raw_file: str) -> list[dict[str, A
         if not line:
             continue
         if line.startswith("#"):
+            # Заголовок в GIRO приходит как комментарий; без него приходится читать строки запасным способом.
             possible_header = line.lstrip("#").strip()
             if "Time" in possible_header and ("foF" in possible_header or "hmF" in possible_header or "MUFD" in possible_header):
                 headers = normalize_giro_headers(split_table_line(possible_header))
@@ -637,6 +668,7 @@ def parse_giro_table(text: str, station: str, raw_file: str) -> list[dict[str, A
 
 
 def split_table_line(line: str) -> list[str]:
+    """Разделяет строку таблицы GIRO на отдельные поля."""
     if "\t" in line:
         return [part.strip() for part in line.split("\t") if part.strip()]
     if "," in line:
@@ -645,6 +677,7 @@ def split_table_line(line: str) -> list[str]:
 
 
 def normalize_giro_headers(headers: list[str]) -> list[str]:
+    """Приводит заголовки GIRO-таблицы к единым именам."""
     normalized: list[str] = []
     previous_measurement = ""
     for header in headers:
@@ -658,6 +691,7 @@ def normalize_giro_headers(headers: list[str]) -> list[str]:
 
 
 def infer_giro_time(row: dict[str, Any]) -> str:
+    """Восстанавливает время наблюдения GIRO из полей строки."""
     for key in ("Time", "Datetime", "UT", "Timestamp", "time"):
         if key in row:
             return normalize_time(row[key])
@@ -669,6 +703,7 @@ def infer_giro_time(row: dict[str, Any]) -> str:
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Записывает строки словарей в CSV-файл."""
     columns: list[str] = []
     seen: set[str] = set()
     preferred = ["source", "product", "station", "time_utc", "error"]
@@ -689,6 +724,7 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def filter_noaa_interval(rows: list[dict[str, Any]], start: datetime, end: datetime) -> list[dict[str, Any]]:
+    """Фильтрует NOAA-данные по рабочему временному интервалу."""
     filtered = []
     for row in rows:
         dt = parse_dt(row.get("time_utc"))
@@ -698,6 +734,7 @@ def filter_noaa_interval(rows: list[dict[str, Any]], start: datetime, end: datet
 
 
 def filter_time_interval(rows: list[dict[str, Any]], start: datetime, end: datetime) -> list[dict[str, Any]]:
+    """Фильтрует строки данных по временному интервалу."""
     filtered = []
     for row in rows:
         dt = parse_dt(row.get("time_utc"))
@@ -707,6 +744,7 @@ def filter_time_interval(rows: list[dict[str, Any]], start: datetime, end: datet
 
 
 def clean_giro(rows: list[dict[str, Any]], limits: dict[str, Any]) -> list[dict[str, Any]]:
+    """Очищает строки GIRO и приводит значения к рабочему формату."""
     clean_rows = []
     for row in rows:
         cleaned = dict(row)
@@ -723,6 +761,7 @@ def clean_giro(rows: list[dict[str, Any]], limits: dict[str, Any]) -> list[dict[
 
 
 def bounded(row: dict[str, Any], key: str, low: float, high: float) -> None:
+    """Ограничивает числовое значение заданным диапазоном."""
     value = maybe_float(row.get(key))
     if value is not None and not (float(low) <= value <= float(high)):
         row[key] = ""
@@ -734,10 +773,12 @@ def build_analytical_dataset(
     gfz_rows: list[dict[str, Any]],
     tolerance_minutes: float,
 ) -> list[dict[str, Any]]:
+    """Объединяет собранные источники в аналитический набор данных."""
     noaa_points = [(parse_dt(row.get("time_utc")), row) for row in noaa_rows if parse_dt(row.get("time_utc"))]
     gfz_points = [(parse_dt(row.get("time_utc")), row) for row in gfz_rows if parse_dt(row.get("time_utc"))]
     dataset: list[dict[str, Any]] = []
     valid_giro_rows = [row for row in giro_rows if not row.get("error")]
+    # Если GIRO не вернул строк, аналитический набор все равно создается по NOAA, чтобы не потерять период индексов.
     base_rows = valid_giro_rows or [
         {"source": "NOAA_SWPC", "station": "", "time_utc": row.get("time_utc", "")}
         for row in noaa_rows
@@ -754,6 +795,7 @@ def build_analytical_dataset(
         }
         dt = parse_dt(record["time_utc"])
         if dt:
+            # Внешние индексы присоединяются по ближайшему времени в пределах заданного допуска.
             nearest = nearest_noaa(dt, noaa_points, tolerance_minutes)
             record.update(extract_noaa_features(nearest))
             record.update(extract_gfz_features(nearest_geophysical(dt, gfz_points, tolerance_minutes)))
@@ -767,6 +809,7 @@ def nearest_noaa(
     points: list[tuple[datetime | None, dict[str, Any]]],
     tolerance_minutes: float,
 ) -> list[dict[str, Any]]:
+    """Находит ближайшую NOAA-запись к заданному времени."""
     tolerance = timedelta(minutes=tolerance_minutes)
     return [row for point_dt, row in points if point_dt and abs(point_dt - dt) <= tolerance]
 
@@ -776,6 +819,7 @@ def nearest_geophysical(
     points: list[tuple[datetime | None, dict[str, Any]]],
     tolerance_minutes: float,
 ) -> list[dict[str, Any]]:
+    """Находит ближайшую геофизическую запись к заданному времени."""
     tolerance = timedelta(minutes=tolerance_minutes)
     best_by_index: dict[str, tuple[timedelta, dict[str, Any]]] = {}
     for point_dt, row in points:
@@ -792,6 +836,7 @@ def nearest_geophysical(
 
 
 def extract_gfz_features(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Извлекает признаки из ближайшей GFZ-записи."""
     features: dict[str, Any] = {}
     names = {
         "Kp": "Kp",
@@ -816,6 +861,7 @@ def extract_gfz_features(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def extract_noaa_features(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Извлекает признаки из ближайшей NOAA-записи."""
     features: dict[str, Any] = {}
     for row in rows:
         product = row.get("product", "")
@@ -835,6 +881,7 @@ def extract_noaa_features(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def set_latest(features: dict[str, Any], key: str, value: Any, time_utc: Any) -> None:
+    """Записывает последнее доступное значение признака в итоговую строку."""
     if value in (None, ""):
         return
     current_time = parse_dt(features.get(f"{key}_time"))
@@ -845,6 +892,7 @@ def set_latest(features: dict[str, Any], key: str, value: Any, time_utc: Any) ->
 
 
 def derive_hf_features(row: dict[str, Any]) -> dict[str, Any]:
+    """Рассчитывает дополнительные HF-признаки из исходных параметров."""
     fof2 = maybe_float(row.get("foF2_MHz"))
     mufd = maybe_float(row.get("MUFD_3000_MHz"))
     kp = maybe_float(row.get("Kp"))
@@ -866,11 +914,13 @@ def derive_hf_features(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def selected_sources(value: str) -> set[str]:
+    """Определяет, какие источники данных включены в запуск."""
     sources = {item.strip().lower() for item in value.split(",") if item.strip()}
     return {"giro", "gfz", "omni", "noaa"} if not sources or "all" in sources else sources
 
 
 def main() -> int:
+    """Запускает основной сценарий файла."""
     args = parse_args()
     config = load_config(args.config)
     start, end = resolve_interval(args, config)

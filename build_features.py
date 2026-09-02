@@ -10,6 +10,7 @@ import pandas as pd
 
 
 def parse_args() -> argparse.Namespace:
+    """Разбирает параметры запуска из командной строки."""
     parser = argparse.ArgumentParser(description="Build leak-aware ML feature tables from station time-grid CSVs.")
     parser.add_argument("--input-dir", default="normalized_2024_2025_exploration_v0_1_15min_by_station")
     parser.add_argument("--config", default="configs/feature_engineering.json")
@@ -19,10 +20,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_config(path: Path) -> dict[str, Any]:
+    """Загружает конфигурацию эксперимента или сбора данных из файла."""
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def duration_to_steps(duration: str, dataset_step: str) -> int:
+    """Переводит длительность временного лага в число шагов сетки."""
     delta = pd.Timedelta(duration)
     step = pd.Timedelta(dataset_step)
     if delta < step:
@@ -33,10 +36,12 @@ def duration_to_steps(duration: str, dataset_step: str) -> int:
 
 
 def safe_name(duration: str) -> str:
+    """Преобразует строку в безопасное имя для файлов и папок."""
     return duration.replace(" ", "").replace("/", "_").replace("-", "_")
 
 
 def add_time_features(frame: pd.DataFrame, time_column: str) -> pd.DataFrame:
+    """Добавляет календарные и циклические временные признаки."""
     time = pd.to_datetime(frame[time_column], utc=True, errors="coerce")
     frame["hour"] = time.dt.hour
     frame["month"] = time.dt.month
@@ -51,12 +56,15 @@ def add_time_features(frame: pd.DataFrame, time_column: str) -> pd.DataFrame:
 
 
 def add_lag_features(frame: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
+    """Добавляет лаговые признаки для выбранных параметров."""
     dataset_step = config["dataset_step"]
     additions: dict[str, pd.Series] = {}
+    # Текущее состояние параметра сохраняется отдельно, чтобы модель видела последнюю известную точку ряда.
     for column in config.get("state_columns", []):
         if column in frame.columns:
             additions[f"{column}_state"] = pd.to_numeric(frame[column], errors="coerce")
 
+    # Лаги строятся только с положительным сдвигом назад: так в признаках не появляется будущее значение.
     for lag in config.get("lags", []):
         steps = duration_to_steps(lag, dataset_step)
         suffix = safe_name(lag)
@@ -64,6 +72,7 @@ def add_lag_features(frame: pd.DataFrame, config: dict[str, Any]) -> pd.DataFram
             if column in frame.columns:
                 additions[f"{column}_lag_{suffix}"] = pd.to_numeric(frame[column], errors="coerce").shift(steps)
 
+    # Разности помогают модели видеть скорость изменения целевого параметра на разных временных масштабах.
     for lag in config.get("diff_lags", []):
         steps = duration_to_steps(lag, dataset_step)
         suffix = safe_name(lag)
@@ -75,6 +84,7 @@ def add_lag_features(frame: pd.DataFrame, config: dict[str, Any]) -> pd.DataFram
 
 
 def add_targets(frame: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
+    """Добавляет целевые значения для заданных горизонтов прогноза."""
     dataset_step = config["dataset_step"]
     additions: dict[str, pd.Series] = {}
     for horizon in config.get("forecast_horizons", []):
@@ -82,11 +92,13 @@ def add_targets(frame: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
         suffix = safe_name(horizon)
         for target in config.get("targets", []):
             if target in frame.columns:
+                # Отрицательный сдвиг делает целевую колонку значением параметра в будущем горизонте прогноза.
                 additions[f"{target}_target_{suffix}"] = pd.to_numeric(frame[target], errors="coerce").shift(-steps)
     return pd.concat([frame, pd.DataFrame(additions, index=frame.index)], axis=1)
 
 
 def load_station_metadata(config: dict[str, Any], base_dir: Path) -> pd.DataFrame | None:
+    """Загружает метаданные станций и приводит их к табличному виду."""
     if not config.get("include_station_metadata", False):
         return None
     metadata_path = base_dir / config.get("station_metadata_path", "")
@@ -98,6 +110,7 @@ def load_station_metadata(config: dict[str, Any], base_dir: Path) -> pd.DataFram
 
 
 def build_station_features(path: Path, config: dict[str, Any], metadata: pd.DataFrame | None) -> pd.DataFrame:
+    """Формирует feature-набор для одной станции."""
     time_column = config.get("time_column", "time_utc")
     station_column = config.get("station_column", "station")
     frame = pd.read_csv(path)
@@ -114,6 +127,7 @@ def build_station_features(path: Path, config: dict[str, Any], metadata: pd.Data
 
 
 def feature_columns(frame: pd.DataFrame, config: dict[str, Any]) -> list[str]:
+    """Выбирает список признаков, используемых для обучения моделей."""
     excluded_prefixes = tuple(f"{target}_target_" for target in config.get("targets", []))
     excluded_exact = {
         config.get("time_column", "time_utc"),
@@ -122,6 +136,7 @@ def feature_columns(frame: pd.DataFrame, config: dict[str, Any]) -> list[str]:
     }
     columns = []
     for column in frame.select_dtypes(include=np.number).columns:
+        # Служебные временные поля и target-колонки исключаются, чтобы не допустить утечку будущего.
         if column in excluded_exact or column.endswith("_source_time") or column.endswith("_valid_until"):
             continue
         if column.startswith(excluded_prefixes):
@@ -131,6 +146,7 @@ def feature_columns(frame: pd.DataFrame, config: dict[str, Any]) -> list[str]:
 
 
 def write_manifest(output_dir: Path, config: dict[str, Any], station_summaries: list[dict[str, Any]]) -> None:
+    """Сохраняет manifest с описанием сформированных признаков."""
     manifest = {
         "config": config,
         "stations": station_summaries,
@@ -140,6 +156,7 @@ def write_manifest(output_dir: Path, config: dict[str, Any], station_summaries: 
 
 
 def main() -> None:
+    """Запускает основной сценарий файла."""
     args = parse_args()
     base_dir = Path.cwd()
     input_dir = Path(args.input_dir)

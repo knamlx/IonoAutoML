@@ -10,6 +10,7 @@ import pandas as pd
 
 
 def parse_args() -> argparse.Namespace:
+    """Разбирает параметры запуска из командной строки."""
     parser = argparse.ArgumentParser(description="Watch a station-by-station ML run.")
     parser.add_argument("--run-dir", default="artifacts/baseline_v0.1")
     parser.add_argument("--interval", type=int, default=30)
@@ -18,6 +19,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def latest_files(run_dir: Path) -> pd.DataFrame:
+    """Находит последние файлы по заданному шаблону."""
     files = sorted(run_dir.rglob("*"), key=lambda path: path.stat().st_mtime if path.is_file() else 0, reverse=True)
     rows = []
     for path in files:
@@ -36,6 +38,7 @@ def latest_files(run_dir: Path) -> pd.DataFrame:
 
 
 def optuna_summary(db_path: Path) -> pd.DataFrame:
+    """Собирает краткую сводку Optuna trial-ов."""
     if not db_path.exists():
         return pd.DataFrame()
     con = sqlite3.connect(db_path)
@@ -55,6 +58,7 @@ def optuna_summary(db_path: Path) -> pd.DataFrame:
 
 
 def station_summaries(run_dir: Path) -> pd.DataFrame:
+    """Собирает краткие сводки по станциям."""
     rows = []
     for path in sorted((run_dir / "stations").glob("*/run_summary.json")) if (run_dir / "stations").exists() else []:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -63,6 +67,7 @@ def station_summaries(run_dir: Path) -> pd.DataFrame:
 
 
 def partial_progress(run_dir: Path) -> pd.DataFrame:
+    """Читает промежуточный прогресс станции."""
     rows = []
     stations_dir = run_dir / "stations"
     if not stations_dir.exists():
@@ -87,6 +92,7 @@ def partial_progress(run_dir: Path) -> pd.DataFrame:
 
 
 def print_snapshot(run_dir: Path) -> None:
+    """Печатает текущий снимок прогресса запуска."""
     print("=" * 90)
     print("RUN_DIR:", run_dir.resolve())
     print("\nLatest files")
@@ -107,6 +113,7 @@ def print_snapshot(run_dir: Path) -> None:
 
 
 def main() -> None:
+    """Запускает основной сценарий файла."""
     args = parse_args()
     run_dir = Path(args.run_dir)
     while True:
