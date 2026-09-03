@@ -1,0 +1,29 @@
+{
+  "time_column": "time_utc",
+  "station_column": "station",
+  "columns": [
+    "foF2",
+    "foF1",
+    "foE",
+    "foEs",
+    "MUF_D",
+    "hmF2",
+    "TEC",
+    "fmin",
+    "foF2p"
+  ],
+  "methods": {
+    "hampel": {
+      "enabled": true,
+      "window": 9,
+      "n_sigma": 3.0
+    },
+    "rolling_median": {
+      "enabled": true,
+      "window": 3
+    }
+  },
+  "keep_original_columns": true,
+  "filtered_suffix": "_filtered",
+  "replace_columns": true
+}

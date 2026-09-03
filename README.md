@@ -43,6 +43,7 @@
 
 - `config.toml` - базовые настройки сбора данных.
 - `configs/time_normalization.json` - правила нормализации временной сетки.
+- `configs/time_series_filtering.json` - настройки фильтрации временных рядов перед построением нового feature dataset.
 - `configs/station_selection.json` - правила отбора станций.
 - `configs/feature_engineering.json` - настройки построения признаков.
 - `configs/stations_metadata.csv` и `configs/stations_metadata.json` - координаты и метаданные станций.
@@ -51,6 +52,8 @@
 - `configs/experiments/baseline_v0.1.json` - базовый ML-эксперимент.
 - `configs/experiments/fof2_fast_ml_24h.json` - быстрый эксперимент для прогноза `foF2` на 24 часа.
 - `configs/experiments/fof2_fast_ml_24h_automl_shap.json` - расширенный эксперимент с AutoML/SHAP.
+- `configs/experiments/fof2_fast_ml_24h_filtered.json` - быстрый эксперимент на данных после фильтрации.
+- `configs/experiments/fof2_fast_ml_24h_filtered_automl_shap.json` - эксперимент на данных после фильтрации с AutoML/SHAP.
 
 ### Ноутбуки
 
@@ -151,6 +154,24 @@ python .\normalize_time_grid.py `
 
 При нормализации GIRO-измерения агрегируются внутри временного окна. Значение `CS = -1` сохраняется как допустимое неизвестное качество, а не как плохая запись. Индексы GFZ и OMNI распространяются вперед только до своего `valid_until`, чтобы не использовать значения вне допустимого интервала.
 
+Фильтрация временных рядов выполняется отдельным шагом и сохраняет результат в новую папку. Исходные нормализованные данные при этом не изменяются:
+
+```powershell
+python .\filter_time_series.py `
+  --input-dir normalized_2024_2025_exploration_v0_1_15min_by_station `
+  --config configs\time_series_filtering.json `
+  --output-dir normalized_2024_2025_exploration_v0_1_15min_filtered_by_station
+```
+
+После фильтрации можно построить отдельный feature dataset:
+
+```powershell
+python .\build_features.py `
+  --input-dir normalized_2024_2025_exploration_v0_1_15min_filtered_by_station `
+  --config configs\feature_engineering.json `
+  --output-dir features_2024_2025_exploration_v0_1_15min_filtered
+```
+
 ## ML/AutoML запуск по станциям
 
 Для основного быстрого эксперимента используется:
@@ -208,6 +229,25 @@ python .\normalize_time_grid.py `
 ```powershell
 .\.venv\Scripts\python.exe .\watch_run_progress.py `
   --run-dir .\artifacts\fof2_fast_ml_24h
+```
+
+Для сравнения вариантов используются отдельные конфиги и отдельные папки результатов:
+
+```powershell
+# Без фильтрации, с AutoML/SHAP
+.\.venv\Scripts\python.exe .\run_station_batch.py `
+  --config .\configs\experiments\fof2_fast_ml_24h_automl_shap.json `
+  --station-file .\configs\station_sets\fof2_fast_ml_24h_all_available.txt
+
+# После фильтрации, без AutoML
+.\.venv\Scripts\python.exe .\run_station_batch.py `
+  --config .\configs\experiments\fof2_fast_ml_24h_filtered.json `
+  --station-file .\configs\station_sets\fof2_fast_ml_24h_all_available.txt
+
+# После фильтрации, с AutoML/SHAP
+.\.venv\Scripts\python.exe .\run_station_batch.py `
+  --config .\configs\experiments\fof2_fast_ml_24h_filtered_automl_shap.json `
+  --station-file .\configs\station_sets\fof2_fast_ml_24h_all_available.txt
 ```
 
 В `run_ml_baselines.py` отдельно контролируется защита от утечки будущего: последние точки train-окна отсекаются, если их target уже попадает в validation или test. Признаки выбираются заново для каждого окна, потому что покрытие данных меняется от станции к станции и от периода к периоду.
