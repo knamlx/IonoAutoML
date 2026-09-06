@@ -1,6 +1,6 @@
 import pandas as pd
 
-from filter_time_series import filter_column, filter_station_file
+from filter_time_series import filter_column, filter_station_file, rolling_median_filter
 
 
 def test_filter_column_replaces_local_outlier() -> None:
@@ -16,6 +16,14 @@ def test_filter_column_replaces_local_outlier() -> None:
 
     assert changed == 1
     assert filtered.iloc[3] < 11.0
+
+
+def test_rolling_median_filter_does_not_use_future_values() -> None:
+    values = pd.Series([1.0, 100.0, 1.0])
+
+    filtered = rolling_median_filter(values, window=3)
+
+    assert filtered.iloc[0] == 1.0
 
 
 def test_filter_station_file_keeps_raw_column(tmp_path) -> None:

@@ -26,15 +26,15 @@ def load_config(path: Path) -> dict[str, Any]:
 
 def rolling_mad(values: pd.Series, window: int) -> pd.Series:
     """Computes rolling median absolute deviation."""
-    median = values.rolling(window=window, center=True, min_periods=1).median()
+    median = values.rolling(window=window, center=False, min_periods=1).median()
     deviation = (values - median).abs()
-    return deviation.rolling(window=window, center=True, min_periods=1).median()
+    return deviation.rolling(window=window, center=False, min_periods=1).median()
 
 
 def hampel_filter(values: pd.Series, window: int, n_sigma: float) -> tuple[pd.Series, pd.Series]:
     """Replaces local outliers with rolling median values."""
     numeric = pd.to_numeric(values, errors="coerce")
-    median = numeric.rolling(window=window, center=True, min_periods=1).median()
+    median = numeric.rolling(window=window, center=False, min_periods=1).median()
     mad = rolling_mad(numeric, window)
     scale = 1.4826 * mad
     outliers = (numeric - median).abs() > (n_sigma * scale)
@@ -46,7 +46,7 @@ def hampel_filter(values: pd.Series, window: int, n_sigma: float) -> tuple[pd.Se
 def rolling_median_filter(values: pd.Series, window: int) -> pd.Series:
     """Applies short rolling median smoothing."""
     numeric = pd.to_numeric(values, errors="coerce")
-    smoothed = numeric.rolling(window=window, center=True, min_periods=1).median()
+    smoothed = numeric.rolling(window=window, center=False, min_periods=1).median()
     return smoothed.where(numeric.notna(), np.nan)
 
 
